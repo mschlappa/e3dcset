@@ -15,7 +15,7 @@
 
 #define E3DC_USER           "deine@email.de"
 #define E3DC_PASSWORD       "passwort e3dc online account"
-#define AES_PASSWORD        "passwort s10 rscp"
+#define AES_PASSWORD        "passwort s10 rsc"
 
 static int iSocket = -1;
 static int iAuthenticated = 0;
@@ -26,7 +26,7 @@ static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
 static uint32_t MAXLEISTUNG = 3000; // Speicher kann mit diesem Wert in Watt Be- und Entladen werden
 static uint32_t MIN_MANUELLE_LADUNG_ENERGIE = 100; // Mindestens 100Wh (0,1kWh) laden 
-static uint32_t MAX_MANUELLE_LADUNG_ENERGIE = 6000; // Maximal 6000Wh (6kWh) laden 
+static uint32_t MAX_MANUELLE_LADUNG_ENERGIE = 8000; // Maximal 8000Wh (8kWh) laden 
 
 static bool automatischLeistungEinstellen = false;
 static uint32_t maxLadeLeistung = 0;
@@ -493,7 +493,7 @@ int main(int argc, char *argv[])
         	// schalten wir auch 'automatischLeistungEinstellen' aktiv
         	manuelleSpeicherladung = true;
 		manuelleLadeEnergie = atoi(optarg);
-		automatischLeistungEinstellen = true;
+		//automatischLeistungEinstellen = true;
         	break;
         case 'a':
         	automatischLeistungEinstellen = true;

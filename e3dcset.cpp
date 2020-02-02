@@ -15,7 +15,7 @@
 
 #define E3DC_USER           "deine@email.de"
 #define E3DC_PASSWORD       "passwort e3dc online account"
-#define AES_PASSWORD        "passwort s10 rsc"
+#define AES_PASSWORD        "passwort s10 rscp"
 
 static int iSocket = -1;
 static int iAuthenticated = 0;

@@ -14,7 +14,7 @@ Bezug von Reststrom preisoptimal gestalten. Details dazu sind [hier] in meinem B
 
 # Installation
 
-Zunächst das git Repository klonen mit
+Zunächst das git Repository klonen mit:
 
 ```sh
 $ git clone https://github.com/mschlappa/e3dcset.git
@@ -39,7 +39,7 @@ $ nano e3dcset.cpp
 #define AES_PASSWORD        "passwort s10 rscp"
 ```
 
-Kompilieren des Tools mit
+Kompilieren des Tools mit:
 
 ```sh
 $ make
@@ -57,7 +57,7 @@ $ ./e3dcset
 Usage: e3dcset [-c maxLadeLeistung] [-d maxEntladeLeistung] [-e manuelleLadeEnergie] [-a]
 ```
 
-Ladeleistung 2000 Watt / Entladen des Speichern unterbinden mit 
+Ladeleistung 2000 Watt / Entladen des Speichern unterbinden mit:
 
 ```sh
 $ ./e3dcset -c 2000 -d 1
@@ -84,7 +84,7 @@ Done!
 ```
 
 Speicher mit 1 kWh (1000 Wh) laden. 
-Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbunden werden
+Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbunden werden:
 
 ```sh
 ./e3dcset -c 2400 -d 1 -e 1000
@@ -101,6 +101,8 @@ Done!
 Hinweise: 
 - Wenn nicht genug PV Leistung zur Verfügung steht, wird der Strom aus dem Netz geladen.
 - Die Fehlermeldung ```Tag 0x0180008F received error code 7.``` ist ein bekannter Fehler meines Tools. Ich habe bisher noch keine Lösung dafür gefunden. Die Funktion "Speicher laden" funktioniert jedoch ohne Probleme.
+
+Viel Spaß beim Ausprobieren!
 
 
 [//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)

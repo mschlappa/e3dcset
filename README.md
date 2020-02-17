@@ -8,6 +8,8 @@ Mit diesem Linux Kommandozeilen Tool können einige Funktionen des S10 Hauskraft
 - Zurückschalten von Lade-/Entladeleistung auf Automatik
 - Sofortiges Laden des Speichers mit einer bestimmten Energiemenge starten
 
+Das Programm basiert auf dem von E3DC zur Verfügung gestellten Beispielprogramm.
+
 # Motivation
 
 Bezug von Reststrom preisoptimal gestalten. Details dazu sind [hier] in meinem Blogpost zu finden.

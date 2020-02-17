@@ -83,7 +83,7 @@ Setze automatischLeistungEinstellen aktiv
 Done!
 ```
 
-Speicher mit 1 kWh laden. 
+Speicher mit 1 kWh (1000 Wh) laden. 
 Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbunden werden
 
 ```sh

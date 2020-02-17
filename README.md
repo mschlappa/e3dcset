@@ -48,7 +48,7 @@ Hinweis: Das kann auf einem älteren Raspberry Pi ein paar Minuten dauern ...
 
 # Aufrufbeispiele
 
-Nachdem das Kompilieren angeschlossen ist, kann man ohne Parameter aufrufen.
+Nachdem das Kompilieren angeschlossen ist, kann man das Tool ohne Parameter aufrufen.
 Es wird dann eine kleine Hilfe ausgegeben:
 
 ```sh

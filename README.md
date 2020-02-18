@@ -55,7 +55,13 @@ Hinweis: Das kann auf einem älteren Raspberry Pi ein paar Minuten dauern ...
 
 Nachdem das Kompilieren angeschlossen ist, kann man das Tool ohne Parameter aufrufen.
 
-Es wird dann eine kleine Hilfe ausgegeben:
+Es wird dann eine kleine Hilfe ausgegeben.
+
+Bedeutung der Kürzel:
+-(c)harge
+-(d)ischarge
+-(e)nergy
+-(a)automatic
 
 ```sh
 $ ./e3dcset

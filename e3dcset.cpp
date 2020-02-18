@@ -6,16 +6,12 @@
 #include "RscpTags.h"
 #include "SocketConnection.h"
 #include "AES.h"
+#include "E3DCSET_CONFIG.h"
 
-#define AES_KEY_SIZE        32
-#define AES_BLOCK_SIZE      32
+#define DEBUG(...)if(debug) {printf(__VA_ARGS__);}
 
-#define SERVER_IP           "192.168.xxx.yyy"
-#define SERVER_PORT         5033
-
-#define E3DC_USER           "deine@email.de"
-#define E3DC_PASSWORD       "passwort e3dc online account"
-#define AES_PASSWORD        "passwort s10 rscp"
+#define AES_KEY_SIZE	32
+#define AES_BLOCK_SIZE	32
 
 static int iSocket = -1;
 static int iAuthenticated = 0;
@@ -24,16 +20,16 @@ static AES aesDecrypter;
 static uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
 static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
-static uint32_t MAXLEISTUNG = 3000; // Speicher kann mit diesem Wert in Watt Be- und Entladen werden
-static uint32_t MIN_MANUELLE_LADUNG_ENERGIE = 100; // Mindestens 100Wh (0,1kWh) laden 
-static uint32_t MAX_MANUELLE_LADUNG_ENERGIE = 8000; // Maximal 8000Wh (8kWh) laden 
-
 static bool automatischLeistungEinstellen = false;
-static uint32_t maxLadeLeistung = 0;
-static uint32_t maxEntladeLeistung = 0;
+static uint32_t ladeLeistung = 0;
+static uint32_t entladeLeistung = 0;
 
 static bool manuelleSpeicherladung = false;
-static uint32_t manuelleLadeEnergie = 0;
+static uint32_t ladungsMenge = 0;
+
+static e3dc_config_t e3dc_config;
+
+static bool debug = false;
 
 int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     RscpProtocol protocol;
@@ -46,12 +42,12 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     //---------------------------------------------------------------------------------------------------------
     if(iAuthenticated == 0)
     {
-        printf("Request authentication\n");
+        DEBUG("Request authentication\n");
         // authentication request
         SRscpValue authenContainer;
         protocol.createContainerValue(&authenContainer, TAG_RSCP_REQ_AUTHENTICATION);
-        protocol.appendValue(&authenContainer, TAG_RSCP_AUTHENTICATION_USER, E3DC_USER);
-        protocol.appendValue(&authenContainer, TAG_RSCP_AUTHENTICATION_PASSWORD, E3DC_PASSWORD);
+        protocol.appendValue(&authenContainer, TAG_RSCP_AUTHENTICATION_USER, e3dc_config.e3dc_user);
+        protocol.appendValue(&authenContainer, TAG_RSCP_AUTHENTICATION_PASSWORD, e3dc_config.e3dc_password);
         // append sub-container to root container
         protocol.appendValue(&rootValue, authenContainer);
         // free memory of sub-container as it is now copied to rootValue
@@ -62,19 +58,19 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         SRscpValue PMContainer;
         protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
         
-	if (manuelleSpeicherladung){
-          protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE,manuelleLadeEnergie);       
+	if (ladungsMenge){
+          protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE,ladungsMenge);
           protocol.appendValue(&rootValue, TAG_EMS_START_MANUAL_CHARGE,true);
         }
         if (automatischLeistungEinstellen){
-          printf("Setze automatischLeistungEinstellen aktiv\n");
+          printf("Setze Lade-/EntladeLeistung auf Automatik\n");
           protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED,false);
 
         }else{
-          printf("Setze maxLadeLeistung=%iW maxEntladeLeistung=%iW\n",maxLadeLeistung,maxEntladeLeistung);
+          printf("Setze LadeLeistung=%iW EntladeLeistung=%iW\n",ladeLeistung,entladeLeistung);
           protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED,true);
-          protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER,maxEntladeLeistung);
-          protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER,maxLadeLeistung); 
+          protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER,entladeLeistung);
+          protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER,ladeLeistung);
         }
        
       	// append sub-container to root container
@@ -111,12 +107,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         if(ucAccessLevel > 0) {
             iAuthenticated = 1;
         }
-        printf("RSCP authentitication level %i\n", ucAccessLevel);
+        DEBUG("RSCP authentitication level %i\n", ucAccessLevel);
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
         if (protocol->getValueAsBool(response)){
-          printf("MANUAL_CHARGE_STARTED\n");
+          DEBUG("MANUAL_CHARGE_STARTED\n");
         }
 	break;
     } 
@@ -145,7 +141,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         printf("EMS add power meter power is %i W\n", iPower);
         break;
     }
-    case TAG_BAT_DATA: {        // resposne for TAG_BAT_REQ_DATA
+    case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
         uint8_t ucBatteryIndex = 0;
         std::vector<SRscpValue> batteryData = protocol->getValueAsContainer(response);
         for(size_t i = 0; i < batteryData.size(); ++i) {
@@ -196,8 +192,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         protocol->destroyValueData(batteryData);
         break;
        }
-	//case TAG_EMS_GET_POWER_SETTINGS:         // resposne for TAG_PM_REQ_DATA
-        case TAG_EMS_SET_POWER_SETTINGS: {        // resposne for TAG_PM_REQ_DATA
+
+        case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;
             std::vector<SRscpValue> PMData = protocol->getValueAsContainer(response);
             for(size_t i = 0; i < PMData.size(); ++i) {
@@ -227,7 +223,6 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     case TAG_EMS_MAX_DISCHARGE_POWER: {              //102 response for TAG_EMS_MAX_DISCHARGE_POWER
                         uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
                         printf("MAX_DISCHARGE_POWER %i W\n", uPower);
-                        //iDischarge = uPower;
                         break;
                     }
                     case TAG_EMS_DISCHARGE_START_POWER:{              //103 response for TAG_EMS_DISCHARGE_START_POWER
@@ -250,16 +245,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         // ...
                     default:
                         // default behaviour
-/*                        printf("Unkonwn GET_POWER_SETTINGS tag %08X", PMData[i].tag);
-                        printf(" len %08X", PMData[i].length);
-                        printf(" datatype %08X\n", PMData[i].dataType);
-                        uint32_t uPower = protocol->getValueAsUInt32(&PMData[i]);
-                        printf(" Value  %i\n", uPower);
-*/                        break;
+                        break;
                 }
             }
             protocol->destroyValueData(PMData);
-//            sleep(10);
             break;
 
     }
@@ -326,7 +315,7 @@ static void receiveLoop(bool & bStopExecution)
             // check maximum size
             if(vecDynamicBuffer.size() > RSCP_MAX_FRAME_LENGTH) {
                 // something went wrong and the size is more than possible by the RSCP protocol
-                printf("Maximum buffer size exceeded %i\n", vecDynamicBuffer.size());
+                printf("Maximum buffer size exceeded %li\n", vecDynamicBuffer.size());
                 bStopExecution = true;
                 break;
             }
@@ -453,7 +442,7 @@ static void mainLoop(void)
             else {
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
-		if (counter > 0) bStopExecution = true; // #MS# end program after first receive
+                if (counter > 0) bStopExecution = true; // #MS# end program after first receive
             }
         }
         // free frame buffer memory
@@ -461,13 +450,147 @@ static void mainLoop(void)
 
         // main loop sleep / cycle time before next request
         sleep(1);
+
 	counter++;
+
     }
 }
 
 void usage(void){
-    fprintf(stderr, "\nUsage: e3dcset [-c maxLadeLeistung] [-d maxEntladeLeistung] [-e manuelleLadeEnergie] [-a]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a]\n\n");
     exit(EXIT_FAILURE);
+}
+
+void readConfig(void){
+
+    FILE *fp;
+
+    fp = fopen(CONF_FILE, "r");
+
+    char var[128], value[128], line[256];
+
+    if(fp) {
+
+    	while (fgets(line, sizeof(line), fp)) {
+
+    		memset(var, 0, sizeof(var));
+    		memset(value, 0, sizeof(value));
+
+    		if(sscanf(line, "%[^ \t=]%*[\t ]=%*[\t ]%[^\n]", var, value) == 2) {
+
+    			if(strcmp(var, "MAX_LEISTUNG") == 0)
+    				e3dc_config.MAX_LEISTUNG = atoi(value);
+
+    			else if(strcmp(var, "MIN_LADUNGSMENGE") == 0)
+    				e3dc_config.MIN_LADUNGSMENGE = atoi(value);
+
+    			else if(strcmp(var, "MAX_LADUNGSMENGE") == 0)
+    				e3dc_config.MAX_LADUNGSMENGE = atoi(value);
+
+    			else if(strcmp(var, "server_ip") == 0)
+    				strcpy(e3dc_config.server_ip, value);
+
+    			else if(strcmp(var, "server_port") == 0)
+    				e3dc_config.server_port = atoi(value);
+
+    			else if(strcmp(var, "e3dc_user") == 0)
+    				strcpy(e3dc_config.e3dc_user, value);
+
+    			else if(strcmp(var, "e3dc_password") == 0)
+    				strcpy(e3dc_config.e3dc_password, value);
+
+    			else if(strcmp(var, "aes_password") == 0)
+    				strcpy(e3dc_config.aes_password, value);
+
+    			else if(strcmp(var, "debug") == 0)
+    				debug = atoi(value);
+                }
+            }
+
+    	DEBUG(" \n");
+    	DEBUG("----------------------------------------------------------\n");
+    	DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", CONF_FILE);
+    	DEBUG("MAX_LEISTUNG=%u\n",e3dc_config.MAX_LEISTUNG);
+    	DEBUG("MIN_LADUNGSMENGE=%u\n",e3dc_config.MIN_LADUNGSMENGE);
+    	DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
+    	DEBUG("server_ip=%s\n",e3dc_config.server_ip);
+    	DEBUG("server_port=%i\n",e3dc_config.server_port);
+    	DEBUG("e3dc_user=%s\n",e3dc_config.e3dc_user);
+    	DEBUG("e3dc_password=%s\n",e3dc_config.e3dc_password);
+    	DEBUG("aes_password=%s\n",e3dc_config.aes_password);
+    	DEBUG("----------------------------------------------------------\n");
+
+    	fclose(fp);
+
+        DEBUG("Config Datei geschlossen");
+
+    } else {
+
+    	printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",CONF_FILE);
+    	exit(EXIT_FAILURE);
+    }
+
+}
+
+void checkArguments(void){
+
+	if (!automatischLeistungEinstellen && (ladeLeistung < 1 || ladeLeistung > e3dc_config.MAX_LEISTUNG)){
+    	fprintf(stderr, "[-c ladeLeistung] muss zwischen 1 und %i liegen\n\n", e3dc_config.MAX_LEISTUNG);
+    	exit(EXIT_FAILURE);
+    }
+
+    if (!automatischLeistungEinstellen && (entladeLeistung < 1 || entladeLeistung > e3dc_config.MAX_LEISTUNG)){
+    	fprintf(stderr, "[-d entladeLeistung] muss zwischen 1 und %i liegen\n\n", e3dc_config.MAX_LEISTUNG);
+    	exit(EXIT_FAILURE);
+    }
+
+    if (automatischLeistungEinstellen && (entladeLeistung > 0 || entladeLeistung > 0)){
+    	fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c ladeLeistung] und [-d entladeLeistung] nicht gesetzt sein\n\n");
+    	exit(EXIT_FAILURE);
+    }
+
+    if (manuelleSpeicherladung && (ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
+    	fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
+    	exit(EXIT_FAILURE);
+    }
+
+}
+
+void connectToServer(void){
+
+    DEBUG("Connecting to server %s:%i\n", e3dc_config.server_ip, e3dc_config.server_port);
+
+    iSocket = SocketConnect(e3dc_config.server_ip, e3dc_config.server_port);
+
+    if(iSocket < 0) {
+    	printf("Connection failed\n");
+    	exit(EXIT_FAILURE);
+    }
+    DEBUG("Connected successfully\n");
+
+    // create AES key and set AES parameters
+    {
+    	// initialize AES encryptor and decryptor IV
+    	memset(ucDecryptionIV, 0xff, AES_BLOCK_SIZE);
+    	memset(ucEncryptionIV, 0xff, AES_BLOCK_SIZE);
+
+    	// limit password length to AES_KEY_SIZE
+    	int iPasswordLength = strlen(e3dc_config.aes_password);
+    	if(iPasswordLength > AES_KEY_SIZE)
+    		iPasswordLength = AES_KEY_SIZE;
+
+    	// copy up to 32 bytes of AES key password
+    	uint8_t ucAesKey[AES_KEY_SIZE];
+    	memset(ucAesKey, 0xff, AES_KEY_SIZE);
+    	memcpy(ucAesKey, e3dc_config.aes_password, iPasswordLength);
+
+    	// set encryptor and decryptor parameters
+    	aesDecrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
+    	aesEncrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
+    	aesDecrypter.StartDecryption(ucAesKey);
+    	aesEncrypter.StartEncryption(ucAesKey);
+    }
+
 }
 
 int main(int argc, char *argv[])
@@ -475,104 +598,58 @@ int main(int argc, char *argv[])
 
 	// Argumente der Kommandozeile parsen
     
-    	if (argc == 1){
-	  usage();
+    if (argc == 1){
+    	usage();
 	}
     
     int opt;
 
     while ((opt = getopt(argc, argv, "c:d:e:a")) != -1) {
-        switch (opt) {
-        case 'c': 
-        	maxLadeLeistung = atoi(optarg);
+
+    	switch (opt) {
+
+    	case 'c':
+        	ladeLeistung = atoi(optarg);
         	break;
         case 'd': 
-        	maxEntladeLeistung = atoi(optarg);
+        	entladeLeistung = atoi(optarg);
         	break;
         case 'e':
-        	// Wenn der Speicher manuell geladen werden soll
-        	// schalten wir auch 'automatischLeistungEinstellen' aktiv
         	manuelleSpeicherladung = true;
-		manuelleLadeEnergie = atoi(optarg);
-		//automatischLeistungEinstellen = true;
+        	ladungsMenge = atoi(optarg);
         	break;
         case 'a':
         	automatischLeistungEinstellen = true;
         	break;
-        default:
+		default:
           usage();
+
         }
     }
 
-// Argumente der Kommandozeile plausibilisieren
-
-    if (!automatischLeistungEinstellen && (maxLadeLeistung < 1 || maxLadeLeistung > MAXLEISTUNG)){
-    	fprintf(stderr, "[-c maxLadeLeistung] muss zwischen 1 und %i liegen\n\n", MAXLEISTUNG);
-    	exit(EXIT_FAILURE);
+    if (optind < argc){
+    	usage();
     }
     
-    if (!automatischLeistungEinstellen && (maxEntladeLeistung < 1 || maxEntladeLeistung > MAXLEISTUNG)){
-    	fprintf(stderr, "[-d maxEntladeLeistung] muss zwischen 1 und %i liegen\n\n", MAXLEISTUNG);
-    	exit(EXIT_FAILURE);
-    }
+    // Lese Konfigurationsdatei
+    readConfig();
+
+    // Argumente der Kommandozeile plausibilisieren
+    DEBUG("checkArguments");
+    checkArguments();
+
+    // Verbinde mit Hauskraftwerk
+    DEBUG("connect");
+    connectToServer();
+
+    // Starte Sende- / Empfangsschleife
+    mainLoop();
+
+    // Trenne Verbindung zum Hauskraftwerk
+    SocketClose(iSocket);
     
-    if (automatischLeistungEinstellen && (maxEntladeLeistung > 0 || maxEntladeLeistung > 0)){
-    	fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c maxLadeLeistung] und [-d maxEntladeLeistung] nicht gesetzt sein\n\n");
-    	exit(EXIT_FAILURE);
-    }
-    
-    if (manuelleSpeicherladung && (manuelleLadeEnergie < MIN_MANUELLE_LADUNG_ENERGIE || manuelleLadeEnergie > MAX_MANUELLE_LADUNG_ENERGIE)){
-    	fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",MIN_MANUELLE_LADUNG_ENERGIE,MAX_MANUELLE_LADUNG_ENERGIE);
-    	exit(EXIT_FAILURE);   	
-    }
+    DEBUG("Done!\n\n");
 
-
-    // endless application which re-connections to server on connection lost
-    
-        // connect to server
-        printf("Connecting to server %s:%i\n", SERVER_IP, SERVER_PORT);
-        iSocket = SocketConnect(SERVER_IP, SERVER_PORT);
-        if(iSocket < 0) {
-            printf("Connection failed\n");
-            sleep(1);
-            //continue;
-        }
-        printf("Connected successfully\n");
-
-        // reset authentication flag
-        iAuthenticated = 0;
-
-        // create AES key and set AES parameters
-        {
-            // initialize AES encryptor and decryptor IV
-            memset(ucDecryptionIV, 0xff, AES_BLOCK_SIZE);
-            memset(ucEncryptionIV, 0xff, AES_BLOCK_SIZE);
-
-            // limit password length to AES_KEY_SIZE
-            int iPasswordLength = strlen(AES_PASSWORD);
-            if(iPasswordLength > AES_KEY_SIZE)
-                iPasswordLength = AES_KEY_SIZE;
-
-            // copy up to 32 bytes of AES key password
-            uint8_t ucAesKey[AES_KEY_SIZE];
-            memset(ucAesKey, 0xff, AES_KEY_SIZE);
-            memcpy(ucAesKey, AES_PASSWORD, iPasswordLength);
-
-            // set encryptor and decryptor parameters
-            aesDecrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
-            aesEncrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
-            aesDecrypter.StartDecryption(ucAesKey);
-            aesEncrypter.StartEncryption(ucAesKey);
-        }
-
-        // enter the main transmit / receive loop
-        mainLoop();
-
-        // close socket connection
-        SocketClose(iSocket);
-        iSocket = -1;
-    
-    printf("Done!\n\n");
     return 0;
 }
 

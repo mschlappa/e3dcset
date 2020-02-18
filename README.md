@@ -6,9 +6,12 @@ Mit diesem Linux Kommandozeilen Tool können einige Funktionen des S10 Hauskraft
 - Ladeleistung des Speichers
 - Entladeleistung des Speichers
 - Zurückschalten von Lade-/Entladeleistung auf Automatik
-- Sofortiges Laden des Speichers mit einer bestimmten Energiemenge starten
+- Sofortiges Laden des Speichers mit einer bestimmten Energiemenge (ggf. auch mit Netzstrom)
 
-Das Programm basiert auf dem von E3DC zur Verfügung gestellten Beispielprogramm.
+Das Programm basiert auf dem von E3DC zur Verfügung gestellten Beispielprogramm sowie 
+einigen Codestellen aus dem Tool [E3DC-Control] von Eberhard Meyer.
+
+Dieses Tool setzt den übergebenen Befehl an das Hauskraftwerk ab und beendet sich dann gleich wieder.  
 
 # Motivation
 
@@ -21,24 +24,24 @@ Zunächst das git Repository klonen mit:
 ```sh
 $ git clone https://github.com/mschlappa/e3dcset.git
 ```
-In das soeben angelegte Verzeichnis e3dcset wechseln und die Datei e3dcset.cpp mit einem Editor Deiner Wahl öffnen (z.B. nano)
+In das soeben angelegte Verzeichnis e3dcset wechseln und die Konfigurationsdatei Datei e3dcset.config mit einem Editor Deiner Wahl öffnen (z.B. nano)
 
 ```sh
 $ cd e3dcset
-$ nano e3dcset.cpp
+$ nano e3dcset.config
 ```
 
-- IP-Adresse sowie Port (Standard 5033) des Hauskraftwerkes anpassen.
+- IP-Adresse sowie Port (Standardport=5033) auf die des eigenen Hauskraftwerkes anpassen.
 - Username / Kennwort vom E3DC Online Account sowie das im Gerät zuvor selbst festgelegte RSCP-Kennwort eintragen 
+- ggf. debug auf 1 setzen, falls zusaetzliche Ausgaben (z.B zur Fehlersuche) gewuenscht werden 
 - Datei beim Verlassen speichern ;-)
 
 ```sh
-#define SERVER_IP           "192.168.xxx.yyy"
-#define SERVER_PORT         5033
-
-#define E3DC_USER           "deine@email.de"
-#define E3DC_PASSWORD       "passwort e3dc online account"
-#define AES_PASSWORD        "passwort s10 rscp"
+server_ip = 127.0.0.1
+server_port = 5033
+e3dc_user = xxx@xxxxx.xx
+e3dc_password = xxxxx
+aes_password = xxxxx
 ```
 
 Kompilieren des Tools mit:
@@ -51,6 +54,7 @@ Hinweis: Das kann auf einem älteren Raspberry Pi ein paar Minuten dauern ...
 # Aufrufbeispiele
 
 Nachdem das Kompilieren angeschlossen ist, kann man das Tool ohne Parameter aufrufen.
+
 Es wird dann eine kleine Hilfe ausgegeben:
 
 ```sh
@@ -64,12 +68,8 @@ Ladeleistung 2000 Watt / Entladen des Speichern unterbinden mit:
 ```sh
 $ ./e3dcset -c 2000 -d 1
 
-Connecting to server 192.168.1.42:5033
-Connected successfully
-Request authentication
-RSCP authentitication level 10
 Setze maxLadeLeistung=2000W maxEntladeLeistung=1W
-Done!
+
 ```
 
 Ladeleistung / Entladeleistung zurück auf Automatik stellen:
@@ -77,12 +77,8 @@ Ladeleistung / Entladeleistung zurück auf Automatik stellen:
 ```sh
 $ ./e3dcset -a
 
-Connecting to server 192.168.1.42:5033
-Connected successfully
-Request authentication
-RSCP authentitication level 10
 Setze automatischLeistungEinstellen aktiv
-Done!
+
 ```
 
 Speicher mit 1 kWh (1000 Wh) laden. 
@@ -90,14 +86,10 @@ Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbu
 
 ```sh
 ./e3dcset -c 2400 -d 1 -e 1000
-Connecting to server 192.168.1.42:5033
-Connected successfully
-Request authentication
-RSCP authentitication level 10
+
 Setze maxLadeLeistung=2400W maxEntladeLeistung=1W
-MANUAL_CHARGE_STARTED
 Tag 0x0180008F received error code 7.
-Done!
+
 ```
 
 Hinweise: 
@@ -107,9 +99,6 @@ Hinweise:
 Viel Spaß beim Ausprobieren!
 
 
-[//]: # (These are reference links used in the body of this note and get stripped out when the markdown processor does its job. There is no need to format nicely because it shouldn't be seen. Thanks SO - http://stackoverflow.com/questions/4823468/store-comments-in-markdown-syntax)
-
-
-   [hier]: <https://elektromobilitaet-duelmen.de/2019/11/22/winter-is-coming/>
-   
-   
+[hier]: https://elektromobilitaet-duelmen.de/2019/11/22/winter-is-coming/   
+[E3DC-Control]: https://github.com/Eba-M/E3DC-Control/  
+ 

@@ -522,8 +522,6 @@ void readConfig(void){
 
     	fclose(fp);
 
-        DEBUG("Config Datei geschlossen");
-
     } else {
 
     	printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",CONF_FILE);
@@ -635,11 +633,9 @@ int main(int argc, char *argv[])
     readConfig();
 
     // Argumente der Kommandozeile plausibilisieren
-    DEBUG("checkArguments");
     checkArguments();
 
     // Verbinde mit Hauskraftwerk
-    DEBUG("connect");
     connectToServer();
 
     // Starte Sende- / Empfangsschleife

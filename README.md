@@ -61,7 +61,7 @@ Bedeutung der Kürzel:
 -(c)harge
 -(d)ischarge
 -(e)nergy
--(a)automatic
+-(a)utomatic
 
 ```sh
 $ ./e3dcset

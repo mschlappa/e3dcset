@@ -60,10 +60,10 @@ Es wird dann eine kleine Hilfe ausgegeben:
 ```sh
 $ ./e3dcset
 
-Usage: e3dcset [-c maxLadeLeistung] [-d maxEntladeLeistung] [-e manuelleLadeEnergie] [-a]
+Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a]
 ```
 
-Ladeleistung 2000 Watt / Entladen des Speichern unterbinden mit:
+Ladeleistung 2000 Watt / Entladen des Speichers unterbinden mit:
 
 ```sh
 $ ./e3dcset -c 2000 -d 1

@@ -31,6 +31,9 @@ static e3dc_config_t e3dc_config;
 
 static bool debug = false;
 
+static char *config = strdup("e3dcset.config");
+
+
 int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     RscpProtocol protocol;
     SRscpValue rootValue;
@@ -465,7 +468,7 @@ void readConfig(void){
 
     FILE *fp;
 
-    fp = fopen(CONF_FILE, "r");
+    fp = fopen(config, "r");
 
     char var[128], value[128], line[256];
 
@@ -509,7 +512,7 @@ void readConfig(void){
 
     	DEBUG(" \n");
     	DEBUG("----------------------------------------------------------\n");
-    	DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", CONF_FILE);
+    	DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", config);
     	DEBUG("MAX_LEISTUNG=%u\n",e3dc_config.MAX_LEISTUNG);
     	DEBUG("MIN_LADUNGSMENGE=%u\n",e3dc_config.MIN_LADUNGSMENGE);
     	DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
@@ -524,7 +527,7 @@ void readConfig(void){
 
     } else {
 
-    	printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",CONF_FILE);
+    	printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",config);
     	exit(EXIT_FAILURE);
     }
 
@@ -594,6 +597,8 @@ void connectToServer(void){
 int main(int argc, char *argv[])
 {
 
+	char *filename;
+
 	// Argumente der Kommandozeile parsen
     
     if (argc == 1){
@@ -602,7 +607,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:a")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:ap:")) != -1) {
 
     	switch (opt) {
 
@@ -619,6 +624,11 @@ int main(int argc, char *argv[])
         case 'a':
         	automatischLeistungEinstellen = true;
         	break;
+        case 'p':
+        	filename = strdup(config);
+        	config = strdup(optarg);
+        	strcat(config, filename);
+        	break;
 		default:
           usage();
 
@@ -628,13 +638,13 @@ int main(int argc, char *argv[])
     if (optind < argc){
     	usage();
     }
-    
+
     // Lese Konfigurationsdatei
     readConfig();
 
     // Argumente der Kommandozeile plausibilisieren
     checkArguments();
-
+    //exit(EXIT_FAILURE);
     // Verbinde mit Hauskraftwerk
     connectToServer();
 

@@ -2,8 +2,6 @@
 #define E3DCSET_CONFIG_h
 #endif
 
-#define CONF_FILE "e3dcset.config"
-
 typedef struct {
 	uint32_t MAX_LEISTUNG;
 	uint32_t MIN_LADUNGSMENGE;

@@ -597,8 +597,6 @@ void connectToServer(void){
 int main(int argc, char *argv[])
 {
 
-	char *filename;
-
 	// Argumente der Kommandozeile parsen
     
     if (argc == 1){
@@ -625,9 +623,7 @@ int main(int argc, char *argv[])
         	automatischLeistungEinstellen = true;
         	break;
         case 'p':
-        	filename = strdup(config);
         	config = strdup(optarg);
-        	strcat(config, filename);
         	break;
 		default:
           usage();

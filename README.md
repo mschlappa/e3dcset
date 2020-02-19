@@ -62,11 +62,12 @@ Bedeutung der Kürzel:
 -(d)ischarge
 -(e)nergy
 -(a)utomatic
+-(p)ath
 
 ```sh
 $ ./e3dcset
 
-Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a]
+Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei]
 ```
 
 Ladeleistung 2000 Watt / Entladen des Speichers unterbinden mit:
@@ -78,10 +79,10 @@ Setze maxLadeLeistung=2000W maxEntladeLeistung=1W
 
 ```
 
-Ladeleistung / Entladeleistung zurück auf Automatik stellen:
+Ladeleistung / Entladeleistung zurück auf Automatik stellen und den Pfad zur Konfigurationsdatei angeben (normalerweise wird im aktuellen Pfad nach der Datei e3dcset.config gesucht):
 
 ```sh
-$ ./e3dcset -a
+$ ./e3dcset -a -p /home/pi/meine.config
 
 Setze automatischLeistungEinstellen aktiv
 

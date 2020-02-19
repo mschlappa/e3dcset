@@ -460,7 +460,7 @@ static void mainLoop(void)
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdetei]\n\n");
     exit(EXIT_FAILURE);
 }
 

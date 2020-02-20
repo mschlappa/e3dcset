@@ -6,26 +6,46 @@
 #include "RscpTags.h"
 #include "SocketConnection.h"
 #include "AES.h"
-#include "E3DCSET_CONFIG.h"
 
 #define DEBUG(...)if(debug) {printf(__VA_ARGS__);}
 
 #define AES_KEY_SIZE	32
 #define AES_BLOCK_SIZE	32
 
+typedef struct {
+
+	uint32_t MIN_LEISTUNG;
+	uint32_t MAX_LEISTUNG;
+	uint32_t MIN_LADUNGSMENGE;
+	uint32_t MAX_LADUNGSMENGE;
+    char 	 server_ip[20];
+    uint32_t server_port;
+    char 	 e3dc_user[128];
+    char 	 e3dc_password[128];
+    char 	 aes_password[128];
+    bool	 debug;
+
+} e3dc_config_t;
+
 static int iSocket = -1;
 static int iAuthenticated = 0;
+
 static AES aesEncrypter;
 static AES aesDecrypter;
+
 static uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
 static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
+static bool leistungAendern = false;
 static bool automatischLeistungEinstellen = false;
+static bool ladeLeistungGesetzt = false;
+static bool entladeLeistungGesetzt = false;
+static bool manuelleSpeicherladung = false;
+
+static uint32_t ladungsMenge = 0;
 static uint32_t ladeLeistung = 0;
 static uint32_t entladeLeistung = 0;
 
-static bool manuelleSpeicherladung = false;
-static uint32_t ladungsMenge = 0;
 
 static e3dc_config_t e3dc_config;
 
@@ -43,8 +63,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     //---------------------------------------------------------------------------------------------------------
     // Create a request frame
     //---------------------------------------------------------------------------------------------------------
-    if(iAuthenticated == 0)
-    {
+    if(iAuthenticated == 0){
         DEBUG("Request authentication\n");
         // authentication request
         SRscpValue authenContainer;
@@ -55,31 +74,51 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         protocol.appendValue(&rootValue, authenContainer);
         // free memory of sub-container as it is now copied to rootValue
         protocol.destroyValueData(authenContainer);
-    }
-    else
-    {
-        SRscpValue PMContainer;
-        protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
-        
-	if (ladungsMenge){
-          protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE,ladungsMenge);
-          protocol.appendValue(&rootValue, TAG_EMS_START_MANUAL_CHARGE,true);
-        }
-        if (automatischLeistungEinstellen){
-          printf("Setze Lade-/EntladeLeistung auf Automatik\n");
-          protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED,false);
 
-        }else{
-          printf("Setze LadeLeistung=%iW EntladeLeistung=%iW\n",ladeLeistung,entladeLeistung);
-          protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED,true);
-          protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER,entladeLeistung);
-          protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER,ladeLeistung);
-        }
-       
-      	// append sub-container to root container
-        protocol.appendValue(&rootValue, PMContainer);
-        // free memory of sub-container as it is now copied to rootValue
-        protocol.destroyValueData(PMContainer);
+    }else{
+
+    	if (manuelleSpeicherladung){
+    		protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, ladungsMenge);
+    	}
+
+    	if (leistungAendern){
+
+    		SRscpValue PMContainer;
+    		protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
+
+            if (automatischLeistungEinstellen){
+
+              printf("Setze Lade-/EntladeLeistung auf Automatik\n");
+              protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED, false);
+
+            }
+
+            if (ladeLeistungGesetzt || entladeLeistungGesetzt){
+
+              protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED, true);
+
+              if (ladeLeistungGesetzt){
+
+                printf("Setze LadeLeistung auf %iW\n",ladeLeistung);
+                protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER, ladeLeistung);
+
+              }
+
+              if (entladeLeistungGesetzt){
+
+                printf("Setze EntladeLeistung auf %iW\n",entladeLeistung);
+                protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER, entladeLeistung);
+
+              }
+
+            }
+
+          	// append sub-container to root container
+            protocol.appendValue(&rootValue, PMContainer);
+            // free memory of sub-container as it is now copied to rootValue
+            protocol.destroyValueData(PMContainer);
+
+    	}
 
     }
 
@@ -114,8 +153,17 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
+
         if (protocol->getValueAsBool(response)){
-          DEBUG("MANUAL_CHARGE_STARTED\n");
+
+        	if (ladungsMenge == 0){
+        		printf("Manuelles Laden gestoppt\n");
+        	}else{
+        		printf("Manuelles Laden gestartet\n");
+        	}
+
+        }else{
+          printf("Manuelles Laden abgeleht.\n");
         }
 	break;
     } 
@@ -481,8 +529,11 @@ void readConfig(void){
 
     		if(sscanf(line, "%[^ \t=]%*[\t ]=%*[\t ]%[^\n]", var, value) == 2) {
 
-    			if(strcmp(var, "MAX_LEISTUNG") == 0)
-    				e3dc_config.MAX_LEISTUNG = atoi(value);
+    			if(strcmp(var, "MIN_LEISTUNG") == 0)
+    				e3dc_config.MIN_LEISTUNG = atoi(value);
+ 
+			else if(strcmp(var, "MAX_LEISTUNG") == 0)
+                                e3dc_config.MAX_LEISTUNG = atoi(value);
 
     			else if(strcmp(var, "MIN_LADUNGSMENGE") == 0)
     				e3dc_config.MIN_LADUNGSMENGE = atoi(value);
@@ -513,6 +564,7 @@ void readConfig(void){
     	DEBUG(" \n");
     	DEBUG("----------------------------------------------------------\n");
     	DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", config);
+        DEBUG("MIN_LEISTUNG=%u\n",e3dc_config.MIN_LEISTUNG);
     	DEBUG("MAX_LEISTUNG=%u\n",e3dc_config.MAX_LEISTUNG);
     	DEBUG("MIN_LADUNGSMENGE=%u\n",e3dc_config.MIN_LADUNGSMENGE);
     	DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
@@ -535,17 +587,17 @@ void readConfig(void){
 
 void checkArguments(void){
 
-	if (!automatischLeistungEinstellen && (ladeLeistung < 1 || ladeLeistung > e3dc_config.MAX_LEISTUNG)){
-    	fprintf(stderr, "[-c ladeLeistung] muss zwischen 1 und %i liegen\n\n", e3dc_config.MAX_LEISTUNG);
+    if (ladeLeistungGesetzt && (ladeLeistung < 0 || ladeLeistung < e3dc_config.MIN_LEISTUNG || ladeLeistung > e3dc_config.MAX_LEISTUNG)){
+    	fprintf(stderr, "[-c ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
     	exit(EXIT_FAILURE);
     }
 
-    if (!automatischLeistungEinstellen && (entladeLeistung < 1 || entladeLeistung > e3dc_config.MAX_LEISTUNG)){
-    	fprintf(stderr, "[-d entladeLeistung] muss zwischen 1 und %i liegen\n\n", e3dc_config.MAX_LEISTUNG);
+    if (entladeLeistungGesetzt && (entladeLeistung < 0 || entladeLeistung < e3dc_config.MIN_LEISTUNG || entladeLeistung > e3dc_config.MAX_LEISTUNG)){
+    	fprintf(stderr, "[-d entladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
     	exit(EXIT_FAILURE);
     }
 
-    if (automatischLeistungEinstellen && (entladeLeistung > 0 || entladeLeistung > 0)){
+    if (automatischLeistungEinstellen && (entladeLeistung > 0 || ladeLeistung > 0)){
     	fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c ladeLeistung] und [-d entladeLeistung] nicht gesetzt sein\n\n");
     	exit(EXIT_FAILURE);
     }
@@ -553,6 +605,11 @@ void checkArguments(void){
     if (manuelleSpeicherladung && (ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
     	fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
     	exit(EXIT_FAILURE);
+    }
+
+    if (!leistungAendern && !manuelleSpeicherladung){
+        fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
+        exit(EXIT_FAILURE);
     }
 
 }
@@ -610,9 +667,13 @@ int main(int argc, char *argv[])
     	switch (opt) {
 
     	case 'c':
+    		leistungAendern = true;
+    		ladeLeistungGesetzt = true;
         	ladeLeistung = atoi(optarg);
         	break;
-        case 'd': 
+        case 'd':
+        	leistungAendern = true;
+            entladeLeistungGesetzt = true;
         	entladeLeistung = atoi(optarg);
         	break;
         case 'e':
@@ -620,13 +681,14 @@ int main(int argc, char *argv[])
         	ladungsMenge = atoi(optarg);
         	break;
         case 'a':
+        	leistungAendern = true;
         	automatischLeistungEinstellen = true;
         	break;
         case 'p':
         	config = strdup(optarg);
         	break;
 		default:
-          usage();
+        	usage();
 
         }
     }
@@ -640,7 +702,7 @@ int main(int argc, char *argv[])
 
     // Argumente der Kommandozeile plausibilisieren
     checkArguments();
-    //exit(EXIT_FAILURE);
+
     // Verbinde mit Hauskraftwerk
     connectToServer();
 
@@ -650,7 +712,7 @@ int main(int argc, char *argv[])
     // Trenne Verbindung zum Hauskraftwerk
     SocketClose(iSocket);
     
-    DEBUG("Done!\n\n");
+    DEBUG("Ende!\n\n");
 
     return 0;
 }

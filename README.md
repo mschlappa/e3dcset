@@ -80,27 +80,21 @@ Ladeleistung 2000 Watt / Entladen des Speichers unterbinden mit:
 
 ```sh
 $ ./e3dcset -c 2000 -d 1
-
 Setze LadeLeistung auf 2000W 
 Setze EntladeLeistung auf 1W
-
 ```
 
-<<<<<<< 2015c10311a49ad03a814cd7068cafe58c981510
 Ladeleistung / Entladeleistung zurück auf Automatik stellen und den Pfad zur Konfigurationsdatei angeben (normalerweise wird im aktuellen Pfad nach der Datei e3dcset.config gesucht):
 
 ```sh
 $ ./e3dcset -a -p /home/pi/meine.config
-=======
+```
 Ladeleistung / Entladeleistung zurück auf Automatik stellen und laufende manuelle Speicherladung stoppen:
 
 ```sh
 $ ./e3dcset -a -e 0
->>>>>>> fix Manuelle Speicherladung
-
-Setze Lade-/EntladeLeistung auf Automatik
+Setze LadeLeistung auf Automatik
 Manuelles Laden gestoppt
-
 ```
 
 Manuelles Laden des Speichers mit 1 kWh (1000 Wh) starten. 
@@ -108,11 +102,9 @@ Ladeleistung soll 2400 Watt betragen und das Entladen des Speichers soll unterbu
 
 ```sh
 ./e3dcset -c 2400 -d 1 -e 1000
-
 Setze LadeLeistung auf 2400W 
 Setze EntladeLeistung auf 1W
 Manuelles Laden gestartet
-
 ```
 
 Hinweise: 

@@ -9,7 +9,7 @@ Mit diesem Linux Kommandozeilen Tool können einige Funktionen des S10 Hauskraft
 - Laufende manuelle Speicherladung stoppen
 
 Das Programm basiert auf dem von E3DC zur Verfügung gestellten Beispielprogramm sowie 
-einigen Codestellen aus dem Tool [E3DC-Control] von Eberhard Meyer.
+einigen Codestellen aus dem Tool [E3DC-Control] von Eberhard Mayer.
 
 Dieses Tool setzt die übergebenen Kommandos an das Hauskraftwerk ab und beendet sich danach.  
 

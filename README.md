@@ -109,7 +109,7 @@ Manuelles Laden gestartet
 
 Hinweise: 
 
-- Wenn nicht genug PV Leistung zur Verfügung steht, wird beim manuelles Laden des Speichern der Strom aus dem Netz bezogen.
+- Wenn nicht genug PV Leistung zur Verfügung steht, wird beim manuelles Laden des Speichers der Strom aus dem Netz bezogen.
 
 
 Viel Spaß beim Ausprobieren!

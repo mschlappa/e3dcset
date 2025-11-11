@@ -19,8 +19,6 @@ Die Grundidee bestand darin, den im Winter unausweichlichen (Rest-)Strombezug in
 
 Idealerweise sollte zu diesen Zeiten auch ein Überangebot an Strom aus erneuerbaren Energien vorhanden sein, damit neben dem ökonomischen auch der ökologische Aspekt nicht zu kurz kommt. Stürmisches Herbstwetter kann in diesem Zusammenhang sehr hilfreich sein.
 
- Details dazu sind [hier] in meinem Blogpost zu finden.
-
 # Installation
 
 Zunächst das git Repository klonen mit:

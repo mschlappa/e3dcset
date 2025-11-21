@@ -2,6 +2,11 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <strings.h>
+#include <time.h>
+#include <map>
+#include <string>
+#include <vector>
 #include "RscpProtocol.h"
 #include "RscpTags.h"
 #include "SocketConnection.h"
@@ -11,6 +16,17 @@
 
 #define AES_KEY_SIZE    32
 #define AES_BLOCK_SIZE  32
+
+// Default values for history queries (required by E3DC device)
+// Intervals and spans are optimized per history type
+#define HISTORY_INTERVAL_DAY      900     // 15 minutes
+#define HISTORY_SPAN_DAY          86400   // 24 hours
+#define HISTORY_INTERVAL_WEEK     3600    // 1 hour
+#define HISTORY_SPAN_WEEK         604800  // 7 days
+#define HISTORY_INTERVAL_MONTH    86400   // 1 day
+#define HISTORY_SPAN_MONTH        2592000 // 30 days
+#define HISTORY_INTERVAL_YEAR     604800  // 1 week
+#define HISTORY_SPAN_YEAR         31536000// 365 days
 
 typedef struct {
 
@@ -27,6 +43,65 @@ typedef struct {
 
 } e3dc_config_t;
 
+// Command Context - kapselt alle Kommandozeilen-bezogenen Zustände
+struct CommandContext {
+    // Control modes
+    bool leistungAendern;
+    bool automatischLeistungEinstellen;
+    bool ladeLeistungGesetzt;
+    bool entladeLeistungGesetzt;
+    bool manuelleSpeicherladung;
+    bool werteAbfragen;
+    bool quietMode;
+    bool listTags;
+    int listCategory;
+    bool historieAbfrage;
+    
+    // Power and energy settings
+    uint32_t ladungsMenge;
+    uint32_t ladeLeistung;
+    uint32_t entladeLeistung;
+    uint32_t leseTag;
+    
+    // History query parameters
+    char *historieDatum;        // Format: "YYYY-MM-DD" or "today"
+    char *historieTyp;          // "day", "week", "month", "year"
+    uint32_t historieInterval;  // Actual interval sent to device
+    uint32_t historieSpan;      // Actual span sent to device
+    time_t historieStartTime;   // Start timestamp for display
+    
+    // Configuration paths
+    char *configPath;
+    char *tagfilePath;
+    char *tagName;  // Speichert Tag-Namen für spätere Konvertierung
+    
+    // Constructor with defaults
+    CommandContext() : 
+        leistungAendern(false),
+        automatischLeistungEinstellen(false),
+        ladeLeistungGesetzt(false),
+        entladeLeistungGesetzt(false),
+        manuelleSpeicherladung(false),
+        werteAbfragen(false),
+        quietMode(false),
+        listTags(false),
+        listCategory(0),
+        historieAbfrage(false),
+        ladungsMenge(0),
+        ladeLeistung(0),
+        entladeLeistung(0),
+        leseTag(0),
+        historieInterval(HISTORY_INTERVAL_DAY),
+        historieSpan(HISTORY_SPAN_DAY),
+        historieStartTime(0),
+        configPath(strdup("e3dcset.config")),
+        tagfilePath(strdup("e3dcset.tags")),
+        tagName(NULL),
+        historieDatum(NULL),
+        historieTyp(NULL)
+    {}
+};
+
 static int iSocket = -1;
 static int iAuthenticated = 0;
 
@@ -36,23 +111,199 @@ static AES aesDecrypter;
 static uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
 static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
-static bool leistungAendern = false;
-static bool automatischLeistungEinstellen = false;
-static bool ladeLeistungGesetzt = false;
-static bool entladeLeistungGesetzt = false;
-static bool manuelleSpeicherladung = false;
-
-static uint32_t ladungsMenge = 0;
-static uint32_t ladeLeistung = 0;
-static uint32_t entladeLeistung = 0;
-
-
 static e3dc_config_t e3dc_config;
 
 static bool debug = false;
 
-static char *config = strdup("e3dcset.config");
+// Globale Command Context Instanz
+static CommandContext g_ctx;
 
+// Tag-Kategorien als Enum statt Magic Numbers
+enum TagCategory {
+    CATEGORY_OVERVIEW = 0,
+    CATEGORY_EMS = 1,
+    CATEGORY_BAT = 2,
+    CATEGORY_PVI = 3,
+    CATEGORY_PM = 4,
+    CATEGORY_WB = 5,
+    CATEGORY_DCDC = 6,
+    CATEGORY_INFO = 7,
+    CATEGORY_DB = 8,
+    CATEGORY_SYS = 9,
+    CATEGORY_MAX = 10  // Für Validierung
+};
+
+// Kategorie-Deskriptoren
+struct CategoryDescriptor {
+    int id;
+    const char* shortName;
+    const char* fullName;
+};
+
+static const CategoryDescriptor categoryDescriptors[] = {
+    {CATEGORY_EMS, "EMS", "Energy Management"},
+    {CATEGORY_BAT, "BAT", "Battery"},
+    {CATEGORY_PVI, "PVI", "PV Inverter"},
+    {CATEGORY_PM, "PM", "Power Meter"},
+    {CATEGORY_WB, "WB", "Wallbox"},
+    {CATEGORY_DCDC, "DCDC", "DC/DC Converter"},
+    {CATEGORY_INFO, "INFO", "System Info"},
+    {CATEGORY_DB, "DB", "Database"},
+    {CATEGORY_SYS, "SYS", "System"}
+};
+static const int NUM_CATEGORIES = sizeof(categoryDescriptors) / sizeof(categoryDescriptors[0]);
+
+// Datenstrukturen für geladene Tags
+struct TagInfo {
+    std::string name;
+    uint32_t hex;
+    std::string description;
+};
+
+std::map<int, std::vector<TagInfo>> loadedTags;  // category -> tags
+std::map<std::string, std::string> loadedInterpretations;  // "hex:value" -> interpretation
+
+// Tag-Datei laden
+void loadTagsFile(const char* filename) {
+    FILE* fp = fopen(filename, "r");
+    if (!fp) {
+        fprintf(stderr, "FEHLER: Tag-Datei '%s' nicht gefunden!\n", filename);
+        fprintf(stderr, "Das Tool benötigt die Tag-Definitions-Datei zum Betrieb.\n");
+        fprintf(stderr, "Bitte stellen Sie sicher, dass 'e3dcset.tags' im aktuellen Verzeichnis vorhanden ist,\n");
+        fprintf(stderr, "oder geben Sie den Pfad mit -t an.\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    char line[512];
+    int currentCategory = 0;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        // Kommentare und leere Zeilen überspringen
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+        
+        // Trim newline
+        line[strcspn(line, "\r\n")] = 0;
+        
+        // Kategorie-Header [EMS], [BAT], etc.
+        if (line[0] == '[') {
+            if (strstr(line, "[EMS]")) currentCategory = 1;
+            else if (strstr(line, "[BAT]")) currentCategory = 2;
+            else if (strstr(line, "[PVI]")) currentCategory = 3;
+            else if (strstr(line, "[PM]")) currentCategory = 4;
+            else if (strstr(line, "[WB]")) currentCategory = 5;
+            else if (strstr(line, "[DCDC]")) currentCategory = 6;
+            else if (strstr(line, "[INFO]")) currentCategory = 7;
+            else if (strstr(line, "[DB]")) currentCategory = 8;
+            else if (strstr(line, "[SYS]")) currentCategory = 9;
+            else if (strstr(line, "[INTERPRETATIONS]")) currentCategory = 100;
+            continue;
+        }
+        
+        if (currentCategory == 100) {
+            // Interpretation: 0x01000009:2 = AC-gekoppelt
+            char hexStr[32], interp[256];
+            if (sscanf(line, "%31[^=] = %255[^\n]", hexStr, interp) == 2) {
+                // Trim whitespace
+                char* h = hexStr; while (*h == ' ') h++;
+                char* hEnd = h + strlen(h) - 1; while (hEnd > h && *hEnd == ' ') *hEnd-- = 0;
+                char* i = interp; while (*i == ' ') i++;
+                char* iEnd = i + strlen(i) - 1; while (iEnd > i && *iEnd == ' ') *iEnd-- = 0;
+                
+                loadedInterpretations[std::string(h)] = std::string(i);
+            }
+        } else if (currentCategory >= 1 && currentCategory <= 9) {
+            // Tag: EMS_POWER_PV = 0x01000001 # PV-Leistung in Watt
+            char tagName[64], hexStr[32], desc[256];
+            char* hashPos = strchr(line, '#');
+            
+            if (hashPos) {
+                *hashPos = '\0';
+                hashPos++;
+                // Trim description
+                while (*hashPos == ' ') hashPos++;
+                strncpy(desc, hashPos, sizeof(desc) - 1);
+                desc[sizeof(desc) - 1] = '\0';
+            } else {
+                desc[0] = '\0';
+            }
+            
+            if (sscanf(line, "%63[^=] = %31s", tagName, hexStr) == 2) {
+                // Trim whitespace from tagName
+                char* t = tagName; while (*t == ' ') t++;
+                char* tEnd = t + strlen(t) - 1; while (tEnd > t && *tEnd == ' ') *tEnd-- = 0;
+                
+                TagInfo info;
+                info.name = std::string(t);
+                info.hex = (uint32_t)strtoul(hexStr, NULL, 16);
+                info.description = std::string(desc);
+                
+                loadedTags[currentCategory].push_back(info);
+            }
+        }
+    }
+    
+    fclose(fp);
+    DEBUG("Tag-Datei '%s' erfolgreich geladen\n", filename);
+}
+
+// Konvertiert Datum zu Unix-Timestamp mit History-Typ-Anpassung (Anfang der Periode)
+time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
+    struct tm tm_date = {0};
+    time_t now;
+    
+    if (strcmp(dateStr, "today") == 0) {
+        time(&now);
+        struct tm* tm_now = localtime(&now);
+        tm_date = *tm_now;
+    } else {
+        // Parse YYYY-MM-DD Format
+        int year, month, day;
+        if (sscanf(dateStr, "%d-%d-%d", &year, &month, &day) != 3) {
+            fprintf(stderr, "Fehler: Ungültiges Datumsformat '%s'\n", dateStr);
+            fprintf(stderr, "Verwenden Sie 'today' oder 'YYYY-MM-DD' (z.B. 2024-11-20)\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        tm_date.tm_year = year - 1900;  // Jahre seit 1900
+        tm_date.tm_mon = month - 1;     // Monat 0-11
+        tm_date.tm_mday = day;
+        tm_date.tm_isdst = -1;  // Auto-detect DST
+    }
+    
+    // Setze auf Mitternacht (00:00:00)
+    tm_date.tm_hour = 0;
+    tm_date.tm_min = 0;
+    tm_date.tm_sec = 0;
+    
+    // Anpassung basierend auf History-Typ - BEVOR mktime()
+    if (strcmp(historyType, "week") == 0) {
+        // Berechne tm_wday erst durch mktime()
+        time_t temp = mktime(&tm_date);
+        struct tm* pTemp = localtime(&temp);
+        if (pTemp) {
+            // Gehe zum Montag der aktuellen Woche (tm_wday: 0=Sonntag, 1=Montag)
+            int daysToMonday = (pTemp->tm_wday == 0) ? 6 : pTemp->tm_wday - 1;
+            tm_date.tm_mday -= daysToMonday;
+        }
+    } else if (strcmp(historyType, "month") == 0) {
+        // Gehe zum 1. des Monats
+        tm_date.tm_mday = 1;
+    } else if (strcmp(historyType, "year") == 0) {
+        // Gehe zum 1. Januar
+        tm_date.tm_mon = 0;
+        tm_date.tm_mday = 1;
+    }
+    
+    // Jetzt finalen Timestamp berechnen
+    time_t timestamp = mktime(&tm_date);
+    if (timestamp == -1) {
+        fprintf(stderr, "Fehler: Konnte Datum nicht konvertieren\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    DEBUG("Konvertiere Datum '%s' (Typ: %s) zu Timestamp: %ld\n", dateStr, historyType, timestamp);
+    return timestamp;
+}
 
 int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     RscpProtocol protocol;
@@ -77,37 +328,84 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
     }else{
 
-        if (manuelleSpeicherladung){
-                protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, ladungsMenge);
+        if (g_ctx.werteAbfragen){
+                DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
+                protocol.appendValue(&rootValue, g_ctx.leseTag);
+        }
+        
+        if (g_ctx.historieAbfrage){
+                DEBUG("Anfrage Historie: Typ=%s, Datum=%s\n", 
+                      g_ctx.historieTyp, g_ctx.historieDatum);
+                
+                // Determine which history tag to use based on type and set appropriate interval and span
+                uint32_t historyTag;
+                if (strcmp(g_ctx.historieTyp, "day") == 0) {
+                    historyTag = TAG_DB_REQ_HISTORY_DATA_DAY;
+                    g_ctx.historieInterval = HISTORY_INTERVAL_DAY;
+                    g_ctx.historieSpan = HISTORY_SPAN_DAY;
+                } else if (strcmp(g_ctx.historieTyp, "week") == 0) {
+                    historyTag = TAG_DB_REQ_HISTORY_DATA_WEEK;
+                    g_ctx.historieInterval = HISTORY_INTERVAL_WEEK;
+                    g_ctx.historieSpan = HISTORY_SPAN_WEEK;
+                } else if (strcmp(g_ctx.historieTyp, "month") == 0) {
+                    historyTag = TAG_DB_REQ_HISTORY_DATA_MONTH;
+                    g_ctx.historieInterval = HISTORY_INTERVAL_MONTH;
+                    g_ctx.historieSpan = HISTORY_SPAN_MONTH;
+                } else if (strcmp(g_ctx.historieTyp, "year") == 0) {
+                    historyTag = TAG_DB_REQ_HISTORY_DATA_YEAR;
+                    g_ctx.historieInterval = HISTORY_INTERVAL_YEAR;
+                    g_ctx.historieSpan = HISTORY_SPAN_YEAR;
+                } else {
+                    fprintf(stderr, "FEHLER: Unbekannter History-Typ: %s\n", g_ctx.historieTyp);
+                    exit(EXIT_FAILURE);
+                }
+                
+                // Convert date to timestamp with correct period start
+                g_ctx.historieStartTime = dateToTimestamp(g_ctx.historieDatum, g_ctx.historieTyp);
+                
+                // Create DB_REQ_HISTORY container
+                SRscpValue historyContainer;
+                protocol.createContainerValue(&historyContainer, historyTag);
+                protocol.appendValue(&historyContainer, TAG_DB_REQ_HISTORY_TIME_START, (uint64_t)g_ctx.historieStartTime);
+                protocol.appendValue(&historyContainer, TAG_DB_REQ_HISTORY_TIME_INTERVAL, g_ctx.historieInterval);
+                protocol.appendValue(&historyContainer, TAG_DB_REQ_HISTORY_TIME_SPAN, g_ctx.historieSpan);
+                
+                // Append history container to root
+                protocol.appendValue(&rootValue, historyContainer);
+                protocol.destroyValueData(historyContainer);
         }
 
-        if (leistungAendern){
+        if (g_ctx.manuelleSpeicherladung){
+                protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
+        }
+
+        if (g_ctx.leistungAendern){
 
                 SRscpValue PMContainer;
                 protocol.createContainerValue(&PMContainer, TAG_EMS_REQ_SET_POWER_SETTINGS);
 
-            if (automatischLeistungEinstellen){
+            if (g_ctx.automatischLeistungEinstellen){
 
               printf("Setze Lade-/EntladeLeistung auf Automatik\n");
               protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED, false);
 
             }
 
-            if (ladeLeistungGesetzt || entladeLeistungGesetzt){
+            if (g_ctx.ladeLeistungGesetzt || g_ctx.entladeLeistungGesetzt){
 
               protocol.appendValue(&PMContainer, TAG_EMS_POWER_LIMITS_USED, true);
 
-              if (ladeLeistungGesetzt){
+              if (g_ctx.ladeLeistungGesetzt){
 
-                printf("Setze LadeLeistung auf %iW\n",ladeLeistung);
-                protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER, ladeLeistung);
+                printf("Setze LadeLeistung auf %iW\n",g_ctx.ladeLeistung);
+                protocol.appendValue(&PMContainer, TAG_EMS_MAX_CHARGE_POWER, g_ctx.ladeLeistung);
 
               }
 
-              if (entladeLeistungGesetzt){
+              if (g_ctx.entladeLeistungGesetzt){
 
-                printf("Setze EntladeLeistung auf %iW\n",entladeLeistung);
-                protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER, entladeLeistung);
+                printf("Setze EntladeLeistung auf %iW\n",g_ctx.entladeLeistung);
+                protocol.appendValue(&PMContainer, TAG_EMS_MAX_DISCHARGE_POWER, g_ctx.entladeLeistung);
 
               }
 
@@ -128,6 +426,45 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     protocol.destroyValueData(rootValue);
 
     return 0;
+}
+
+const char* interpretValue(uint32_t tag, int64_t value) {
+    // Suche Interpretation in geladenen Daten aus e3dcset.tags
+    char key[64];
+    snprintf(key, sizeof(key), "0x%08X:%lld", tag, (long long)value);
+    auto it = loadedInterpretations.find(std::string(key));
+    if (it != loadedInterpretations.end()) {
+        return it->second.c_str();
+    }
+    
+    // Falls RESPONSE-Tag: Versuche mit REQUEST-Tag (zweites Byte & 0x7F)
+    uint8_t secondByte = (tag >> 16) & 0xFF;
+    if (secondByte >= 0x80) {
+        // Konvertiere RESPONSE zu REQUEST: zweites Byte AND 0x7F
+        uint32_t requestTag = (tag & 0xFF00FFFF) | (((secondByte & 0x7F) << 16));
+        snprintf(key, sizeof(key), "0x%08X:%lld", requestTag, (long long)value);
+        it = loadedInterpretations.find(std::string(key));
+        if (it != loadedInterpretations.end()) {
+            return it->second.c_str();
+        }
+    }
+    
+    // Keine Interpretation verfügbar
+    return NULL;
+}
+
+// Unified value formatter - eliminiert Code-Duplikation in Response-Handling
+void printFormattedValue(uint32_t tag, const char* valueStr, int64_t numericValue) {
+    if (g_ctx.quietMode) {
+        printf("%s\n", valueStr);
+    } else {
+        const char* interp = interpretValue(tag, numericValue);
+        if (interp) {
+            printf("%s (%s)\n", valueStr, interp);
+        } else {
+            printf("%s\n", valueStr);
+        }
+    }
 }
 
 int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
@@ -156,7 +493,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
 
         if (protocol->getValueAsBool(response)){
 
-                if (ladungsMenge == 0){
+                if (g_ctx.ladungsMenge == 0){
                         printf("Manuelles Laden gestoppt\n");
                 }else{
                         printf("Manuelles Laden gestartet\n");
@@ -169,27 +506,47 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     } 
     case TAG_EMS_POWER_PV: {    // response for TAG_EMS_REQ_POWER_PV
         int32_t iPower = protocol->getValueAsInt32(response);
-        printf("EMS PV power is %i W\n", iPower);
+        if (g_ctx.quietMode) {
+            printf("%i\n", iPower);
+        } else {
+            printf("EMS PV power is %i W\n", iPower);
+        }
         break;
     }
     case TAG_EMS_POWER_BAT: {    // response for TAG_EMS_REQ_POWER_BAT
         int32_t iPower = protocol->getValueAsInt32(response);
-        printf("EMS BAT power is %i W\n", iPower);
+        if (g_ctx.quietMode) {
+            printf("%i\n", iPower);
+        } else {
+            printf("EMS BAT power is %i W\n", iPower);
+        }
         break;
     }
     case TAG_EMS_POWER_HOME: {    // response for TAG_EMS_REQ_POWER_HOME
         int32_t iPower = protocol->getValueAsInt32(response);
-        printf("EMS house power is %i W\n", iPower);
+        if (g_ctx.quietMode) {
+            printf("%i\n", iPower);
+        } else {
+            printf("EMS house power is %i W\n", iPower);
+        }
         break;
     }
     case TAG_EMS_POWER_GRID: {    // response for TAG_EMS_REQ_POWER_GRID
         int32_t iPower = protocol->getValueAsInt32(response);
-        printf("EMS grid power is %i W\n", iPower);
+        if (g_ctx.quietMode) {
+            printf("%i\n", iPower);
+        } else {
+            printf("EMS grid power is %i W\n", iPower);
+        }
         break;
     }
     case TAG_EMS_POWER_ADD: {    // response for TAG_EMS_REQ_POWER_ADD
         int32_t iPower = protocol->getValueAsInt32(response);
-        printf("EMS add power meter power is %i W\n", iPower);
+        if (g_ctx.quietMode) {
+            printf("%i\n", iPower);
+        } else {
+            printf("EMS add power meter power is %i W\n", iPower);
+        }
         break;
     }
     case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
@@ -303,10 +660,302 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             break;
 
     }
+    
+    // History data responses
+    case TAG_DB_HISTORY_DATA_DAY:
+    case TAG_DB_HISTORY_DATA_WEEK:
+    case TAG_DB_HISTORY_DATA_MONTH:
+    case TAG_DB_HISTORY_DATA_YEAR: {
+        if (!g_ctx.historieAbfrage) {
+            printf("Unerwartete History-Response (Tag 0x%08X)\n", response->tag);
+            break;
+        }
+        
+        const char* typeStr = "Unknown";
+        const char* intervalName = "";
+        const char* spanName = "";
+        if (response->tag == TAG_DB_HISTORY_DATA_DAY) {
+            typeStr = "Tag";
+            spanName = "24 Stunden";
+            intervalName = "15 Minuten";
+        } else if (response->tag == TAG_DB_HISTORY_DATA_WEEK) {
+            typeStr = "Woche";
+            spanName = "7 Tage";
+            intervalName = "1 Stunde";
+        } else if (response->tag == TAG_DB_HISTORY_DATA_MONTH) {
+            typeStr = "Monat";
+            spanName = "30 Tage";
+            intervalName = "1 Tag";
+        } else if (response->tag == TAG_DB_HISTORY_DATA_YEAR) {
+            typeStr = "Jahr";
+            spanName = "365 Tage";
+            intervalName = "1 Woche";
+        }
+        
+        // Format start and end dates
+        time_t startTime = g_ctx.historieStartTime;
+        time_t endTime = g_ctx.historieStartTime + g_ctx.historieSpan - 1;
+        
+        char startStr[32] = "N/A", endStr[32] = "N/A";
+        
+        if (startTime > 0) {
+            struct tm startTm, endTm;
+            
+            // WICHTIG: localtime() überschreibt statischen Buffer!
+            // Deshalb SOFORT nach jedem Aufruf kopieren!
+            struct tm *pStartTm = localtime(&startTime);
+            if (pStartTm) {
+                startTm = *pStartTm;  // Sofort kopieren!
+                strftime(startStr, sizeof(startStr), "%d.%m.%Y", &startTm);
+            }
+            
+            struct tm *pEndTm = localtime(&endTime);
+            if (pEndTm) {
+                endTm = *pEndTm;  // Sofort kopieren!
+                strftime(endStr, sizeof(endStr), "%d.%m.%Y", &endTm);
+            }
+        }
+        
+        printf("Zeitraum: %s - %s\n", startStr, endStr);
+        
+        std::vector<SRscpValue> historyData = protocol->getValueAsContainer(response);
+        
+        for(size_t i = 0; i < historyData.size(); ++i) {
+            if(historyData[i].dataType == RSCP::eTypeError) {
+                uint32_t uiErrorCode = protocol->getValueAsUInt32(&historyData[i]);
+                printf("Fehler: Tag 0x%08X, Code %u\n", historyData[i].tag, uiErrorCode);
+                continue;
+            }
+            
+            switch(historyData[i].tag) {
+                case TAG_DB_SUM_CONTAINER: {
+                    std::vector<SRscpValue> sumData = protocol->getValueAsContainer(&historyData[i]);
+                    
+                    float batPowerIn = 0, batPowerOut = 0, dcPower = 0;
+                    float gridPowerIn = 0, gridPowerOut = 0, consumption = 0;
+                    float soc = 0, autarky = 0;
+                    uint32_t graphIndex = 0;
+                    
+                    for(size_t j = 0; j < sumData.size(); ++j) {
+                        switch(sumData[j].tag) {
+                            case TAG_DB_GRAPH_INDEX:
+                                graphIndex = protocol->getValueAsUInt32(&sumData[j]);
+                                break;
+                            case TAG_DB_BAT_POWER_IN:
+                                batPowerIn = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_BAT_POWER_OUT:
+                                batPowerOut = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_DC_POWER:
+                                dcPower = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_GRID_POWER_IN:
+                                gridPowerIn = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_GRID_POWER_OUT:
+                                gridPowerOut = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_CONSUMPTION:
+                                consumption = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_BAT_CHARGE_LEVEL:
+                                soc = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_AUTARKY:
+                                autarky = protocol->getValueAsFloat32(&sumData[j]);
+                                break;
+                            case TAG_DB_BAT_CYCLE_COUNT:
+                            case TAG_DB_CONSUMED_PRODUCTION:
+                            case TAG_DB_PM_0_POWER:
+                            case TAG_DB_PM_1_POWER:
+                                // Diese Tags werden aktuell nicht ausgegeben
+                                break;
+                        }
+                    }
+                    
+                    printf("PV-Produktion:      %.2f kWh\n", dcPower / 1000.0);
+                    printf("Batterie geladen:   %.2f kWh\n", batPowerIn / 1000.0);
+                    printf("Batterie entladen:  %.2f kWh\n", batPowerOut / 1000.0);
+                    printf("Netzbezug:          %.2f kWh\n", gridPowerOut / 1000.0);
+                    printf("Netzeinspeisung:    %.2f kWh\n", gridPowerIn / 1000.0);
+                    printf("Hausverbrauch:      %.2f kWh\n", consumption / 1000.0);
+                    if (autarky > 0) printf("Autarkie:           %.1f %%\n", autarky);
+                    
+                    protocol->destroyValueData(sumData);
+                    break;
+                }
+                case TAG_DB_VALUE_CONTAINER: {
+                    // Datenpunkte werden nicht angezeigt - nur Zusammenfassung
+                    std::vector<SRscpValue> tmpData = protocol->getValueAsContainer(&historyData[i]);
+                    protocol->destroyValueData(tmpData);
+                    break;
+                }
+                default:
+                    printf("  Unbekannter History-Sub-Tag 0x%08X\n", historyData[i].tag);
+                    break;
+            }
+        }
+        
+        protocol->destroyValueData(historyData);
+        break;
+    }
+    
     // ...
     default:
-        // default behavior
-        printf("Unknown tag %08X\n", response->tag);
+        // Generic handler for read requests
+        if (g_ctx.werteAbfragen) {
+            if (!g_ctx.quietMode) {
+                printf("Tag 0x%08X: ", response->tag);
+            }
+            switch(response->dataType) {
+                case RSCP::eTypeBool: {
+                    bool bValue = protocol->getValueAsBool(response);
+                    printFormattedValue(response->tag, bValue ? "true" : "false", bValue ? 1 : 0);
+                    break;
+                }
+                case RSCP::eTypeChar8: {
+                    int8_t value = protocol->getValueAsChar8(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeUChar8: {
+                    uint8_t value = protocol->getValueAsUChar8(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeInt16: {
+                    int16_t value = protocol->getValueAsInt16(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeUInt16: {
+                    uint16_t value = protocol->getValueAsUInt16(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeInt32: {
+                    int32_t value = protocol->getValueAsInt32(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeUInt32: {
+                    uint32_t value = protocol->getValueAsUInt32(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    printFormattedValue(response->tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeInt64: {
+                    long long value = (long long)protocol->getValueAsInt64(response);
+                    // Check if value looks like a millisecond timestamp (between 2020-2040)
+                    if (!g_ctx.quietMode && value > 1577836800000LL && value < 2209075200000LL) {
+                        time_t seconds = (time_t)(value / 1000);
+                        int milliseconds = value % 1000;
+                        struct tm *timeinfo = localtime(&seconds);
+                        char timeStr[80];
+                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
+                        printf("%s.%03d\n", timeStr, milliseconds);
+                    } else {
+                        printf("%lld\n", value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt64: {
+                    unsigned long long value = (unsigned long long)protocol->getValueAsUInt64(response);
+                    // Check if value looks like a millisecond timestamp (between 2020-2040)
+                    if (!g_ctx.quietMode && value > 1577836800000ULL && value < 2209075200000ULL) {
+                        time_t seconds = (time_t)(value / 1000);
+                        int milliseconds = value % 1000;
+                        struct tm *timeinfo = localtime(&seconds);
+                        char timeStr[80];
+                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
+                        printf("%s.%03d\n", timeStr, milliseconds);
+                    } else {
+                        printf("%llu\n", value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeFloat32: {
+                    float value = protocol->getValueAsFloat32(response);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%.2f", value);
+                    printFormattedValue(response->tag, buf, (int64_t)value);
+                    break;
+                }
+                case RSCP::eTypeDouble64:
+                    printf("%.2f\n", protocol->getValueAsDouble64(response));
+                    break;
+                case RSCP::eTypeBitfield:
+                    printf("0x%08X\n", protocol->getValueAsUInt32(response));
+                    break;
+                case RSCP::eTypeString: {
+                    std::string str = protocol->getValueAsString(response);
+                    printf("%s\n", str.c_str());
+                    break;
+                }
+                case RSCP::eTypeContainer: {
+                    std::vector<SRscpValue> container = protocol->getValueAsContainer(response);
+                    if (!g_ctx.quietMode) {
+                        printf("Container (%zu Elemente)\n", container.size());
+                        for(size_t i = 0; i < container.size(); ++i) {
+                            printf("  [%zu] ", i);
+                            handleResponseValue(protocol, &container[i]);
+                        }
+                    } else {
+                        for(size_t i = 0; i < container.size(); ++i) {
+                            handleResponseValue(protocol, &container[i]);
+                        }
+                    }
+                    protocol->destroyValueData(container);
+                    break;
+                }
+                case RSCP::eTypeByteArray: {
+                    if (!g_ctx.quietMode) {
+                        printf("ByteArray (Laenge: %d bytes): ", response->length);
+                    }
+                    int displayLength = response->length > 16 ? 16 : response->length;
+                    for(int i = 0; i < displayLength; i++) {
+                        printf("%02X ", response->data[i]);
+                    }
+                    if(response->length > 16) {
+                        printf("... ");
+                    }
+                    printf("\n");
+                    break;
+                }
+                case RSCP::eTypeTimestamp: {
+                    SRscpTimestamp ts = protocol->getValueAsTimestamp(response);
+                    if (!g_ctx.quietMode) {
+                        time_t seconds = (time_t)ts.seconds;
+                        struct tm *timeinfo = localtime(&seconds);
+                        char timeStr[80];
+                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
+                        printf("%s.%03u\n", timeStr, ts.nanoseconds / 1000000);
+                    } else {
+                        printf("%llu.%09u\n", (unsigned long long)ts.seconds, ts.nanoseconds);
+                    }
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Unbekannter Datentyp %d\n", response->dataType);
+                    }
+                    break;
+            }
+        } else {
+            printf("Unknown tag %08X\n", response->tag);
+        }
         break;
     }
     return 0;
@@ -507,8 +1156,138 @@ static void mainLoop(void)
     }
 }
 
+uint32_t getTagByName(const char* name) {
+    // Zuerst in geladenen Tags suchen
+    if (!loadedTags.empty()) {
+        for (auto& catPair : loadedTags) {
+            for (const auto& tag : catPair.second) {
+                if (strcasecmp(name, tag.name.c_str()) == 0) {
+                    return tag.hex;
+                }
+            }
+        }
+    }
+    
+    // Tag nicht gefunden
+    fprintf(stderr, "FEHLER: Tag '%s' nicht in der Tags-Datei gefunden!\n", name);
+    fprintf(stderr, "Bitte verwenden Sie './e3dcset -l 0' um verfügbare Tags anzuzeigen,\n");
+    fprintf(stderr, "oder nutzen Sie direkt den Hex-Wert (z.B. -r 0x01000001).\n\n");
+    exit(EXIT_FAILURE);
+}
+
+bool isRequestTag(uint32_t tag) {
+    // REQUEST Tags haben im zweiten Byte (Bits 16-23) einen Wert < 0x80
+    // RESPONSE Tags haben im zweiten Byte einen Wert >= 0x80
+    uint8_t secondByte = (tag >> 16) & 0xFF;
+    return secondByte < 0x80;
+}
+
+void printTagList(int category) {
+    // Validierung mit Enum statt Magic Numbers
+    if (category < CATEGORY_OVERVIEW || category >= CATEGORY_MAX) {
+        fprintf(stderr, "\nFehler: Ungültige Kategorie %d\n\n", category);
+        fprintf(stderr, "Verfügbare Kategorien:\n");
+        fprintf(stderr, "  %d - Übersicht aller Kategorien\n", CATEGORY_OVERVIEW);
+        for (int i = 0; i < NUM_CATEGORIES; i++) {
+            fprintf(stderr, "  %d - %s (%s)\n", 
+                    categoryDescriptors[i].id, 
+                    categoryDescriptors[i].shortName, 
+                    categoryDescriptors[i].fullName);
+        }
+        fprintf(stderr, "\nBeispiel: ./e3dcset -l 0  (Übersicht)\n");
+        fprintf(stderr, "         ./e3dcset -l 1  (EMS Tags anzeigen)\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (category == CATEGORY_OVERVIEW) {
+        printf("\n=== Verfügbare RSCP Tag Kategorien ===\n\n");
+        for (int i = 0; i < NUM_CATEGORIES; i++) {
+            const CategoryDescriptor& desc = categoryDescriptors[i];
+            printf("  %d - %s (%s)", desc.id, desc.shortName, desc.fullName);
+            // Zeige Anzahl geladener Tags an, falls verfügbar
+            if (!loadedTags.empty() && loadedTags.find(desc.id) != loadedTags.end()) {
+                printf(" (%zu Tags geladen)", loadedTags[desc.id].size());
+            }
+            printf("\n");
+        }
+        printf("\n=== Verwendung ===\n");
+        printf("  ./e3dcset -l <kategorie>     # Tag-Liste anzeigen\n");
+        printf("  ./e3dcset -r <tag-name>      # Tag-Wert abfragen\n\n");
+        printf("=== Beispiele ===\n");
+        printf("  ./e3dcset -l %d               # EMS Tags anzeigen\n", CATEGORY_EMS);
+        printf("  ./e3dcset -l %d               # Battery Tags anzeigen\n", CATEGORY_BAT);
+        printf("  ./e3dcset -r EMS_POWER_PV    # PV-Leistung abfragen\n");
+        printf("  ./e3dcset -r BAT_DATA        # Batterie-Daten abfragen\n");
+        printf("  ./e3dcset -r EMS_BAT_SOC -q  # Nur Wert ausgeben\n\n");
+        return;
+    }
+    
+    // Find descriptor for this category
+    const char* categoryName = "Unknown";
+    for (int i = 0; i < NUM_CATEGORIES; i++) {
+        if (categoryDescriptors[i].id == category) {
+            categoryName = categoryDescriptors[i].fullName;
+            break;
+        }
+    }
+    
+    printf("\n=== Kategorie %d: %s ===\n\n", category, categoryName);
+    
+    printf("%-30s %-12s %s\n", "Tag-Name", "Hex-Wert", "Beschreibung");
+    printf("%-30s %-12s %s\n", "------------------------------", "------------", "---------------------------------------------");
+    
+    // Tags aus geladener Datei verwenden
+    if (!loadedTags.empty() && loadedTags.find(category) != loadedTags.end()) {
+        for (const auto& tag : loadedTags[category]) {
+            printf("%-30s 0x%08X   %s\n", tag.name.c_str(), tag.hex, tag.description.c_str());
+        }
+    } else {
+        fprintf(stderr, "\nFEHLER: Keine Tags für Kategorie %d gefunden!\n", category);
+        fprintf(stderr, "Bitte überprüfen Sie die Tag-Datei.\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    printf("\n=== Beispiele ===\n");
+    if (category == CATEGORY_EMS) {
+        printf("  ./e3dcset -r EMS_POWER_PV       # PV-Leistung abfragen\n");
+        printf("  ./e3dcset -r EMS_BAT_SOC -q     # Batterie-SOC (nur Wert)\n");
+    } else if (category == CATEGORY_BAT) {
+        printf("  ./e3dcset -r BAT_DATA           # Batterie-Daten Container\n");
+        printf("  ./e3dcset -r BAT_RSOC -q        # RSOC (nur Wert)\n");
+    } else {
+        printf("  ./e3dcset -r <tag-name>         # Tag-Wert abfragen\n");
+        printf("  ./e3dcset -r <tag-name> -q      # Nur Wert ausgeben\n");
+    }
+    printf("  ./e3dcset -r 0x%08X       # Mit Hex-Wert\n\n", category == CATEGORY_EMS ? TAG_EMS_REQ_BAT_SOC : TAG_BAT_REQ_DATA);
+}
+
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -r TAG_NAME [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -l [kategorie]\n");
+    fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "   Optionen:\n");
+    fprintf(stderr, "     -c  LadeLeistung in Watt setzen\n");
+    fprintf(stderr, "     -d  EntladeLeistung in Watt setzen\n");
+    fprintf(stderr, "     -e  Manuelle Ladungsmenge in Wh setzen (0 = stoppen)\n");
+    fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
+    fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
+    fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
+    fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
+    fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
+    fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
+    fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
+    fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
+    fprintf(stderr, "   Hinweis: -r und -H können nicht mit -c, -d, -e oder -a kombiniert werden\n\n");
+    fprintf(stderr, "   Beispiele:\n");
+    fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
+    fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
+    fprintf(stderr, "     e3dcset -r EMS_POWER_PV         # PV-Leistung abfragen\n");
+    fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
+    fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
+    fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
+    fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
+    fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n\n");
     exit(EXIT_FAILURE);
 }
 
@@ -516,7 +1295,7 @@ void readConfig(void){
 
     FILE *fp;
 
-    fp = fopen(config, "r");
+    fp = fopen(g_ctx.configPath, "r");
 
     char var[128], value[128], line[256];
 
@@ -563,7 +1342,7 @@ void readConfig(void){
 
         DEBUG(" \n");
         DEBUG("----------------------------------------------------------\n");
-        DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", config);
+        DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", g_ctx.configPath);
         DEBUG("MIN_LEISTUNG=%u\n",e3dc_config.MIN_LEISTUNG);
         DEBUG("MAX_LEISTUNG=%u\n",e3dc_config.MAX_LEISTUNG);
         DEBUG("MIN_LADUNGSMENGE=%u\n",e3dc_config.MIN_LADUNGSMENGE);
@@ -579,7 +1358,7 @@ void readConfig(void){
 
     } else {
 
-        printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",config);
+        printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",g_ctx.configPath);
         exit(EXIT_FAILURE);
     }
 
@@ -587,27 +1366,61 @@ void readConfig(void){
 
 void checkArguments(void){
 
-    if (ladeLeistungGesetzt && (ladeLeistung < 0 || ladeLeistung < e3dc_config.MIN_LEISTUNG || ladeLeistung > e3dc_config.MAX_LEISTUNG)){
-        fprintf(stderr, "[-c ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
+    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung)){
+        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen)){
+        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
         exit(EXIT_FAILURE);
     }
 
-    if (entladeLeistungGesetzt && (entladeLeistung < 0 || entladeLeistung < e3dc_config.MIN_LEISTUNG || entladeLeistung > e3dc_config.MAX_LEISTUNG)){
-        fprintf(stderr, "[-d entladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
+    if (g_ctx.werteAbfragen && g_ctx.leseTag == 0){
+        fprintf(stderr, "[-r] benoetigt einen gueltigen TAG-Wert (z.B. 0x01000001 oder battery-soc)\n\n");
         exit(EXIT_FAILURE);
     }
 
-    if (automatischLeistungEinstellen && (entladeLeistung > 0 || ladeLeistung > 0)){
-        fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c ladeLeistung] und [-d entladeLeistung] nicht gesetzt sein\n\n");
+    if (g_ctx.quietMode && !g_ctx.werteAbfragen){
+        fprintf(stderr, "[-q] kann nur zusammen mit [-r] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.historieDatum && !g_ctx.historieAbfrage){
+        fprintf(stderr, "[-D] kann nur zusammen mit [-H] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.historieAbfrage && !g_ctx.historieTyp){
+        fprintf(stderr, "[-H] benötigt einen History-Typ (day, week, month, year)\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.historieAbfrage && !g_ctx.historieDatum){
+        g_ctx.historieDatum = strdup("today");
+    }
+
+    if (g_ctx.ladeLeistungGesetzt && (g_ctx.ladeLeistung < 0 || g_ctx.ladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.ladeLeistung > e3dc_config.MAX_LEISTUNG)){
+        fprintf(stderr, "[-c g_ctx.ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
         exit(EXIT_FAILURE);
     }
 
-    if (manuelleSpeicherladung && (ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
+    if (g_ctx.entladeLeistungGesetzt && (g_ctx.entladeLeistung < 0 || g_ctx.entladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.entladeLeistung > e3dc_config.MAX_LEISTUNG)){
+        fprintf(stderr, "[-d g_ctx.entladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
+        exit(EXIT_FAILURE);
+    }
+
+    if (g_ctx.automatischLeistungEinstellen && (g_ctx.entladeLeistung > 0 || g_ctx.ladeLeistung > 0)){
+        fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c g_ctx.ladeLeistung] und [-d g_ctx.entladeLeistung] nicht gesetzt sein\n\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (g_ctx.manuelleSpeicherladung && (g_ctx.ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || g_ctx.ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
         fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
         exit(EXIT_FAILURE);
     }
 
-    if (!leistungAendern && !manuelleSpeicherladung){
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }
@@ -662,30 +1475,83 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:ap:r:qlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
         case 'c':
-                leistungAendern = true;
-                ladeLeistungGesetzt = true;
-                ladeLeistung = atoi(optarg);
+                g_ctx.leistungAendern = true;
+                g_ctx.ladeLeistungGesetzt = true;
+                g_ctx.ladeLeistung = atoi(optarg);
                 break;
         case 'd':
-                leistungAendern = true;
-            entladeLeistungGesetzt = true;
-                entladeLeistung = atoi(optarg);
+                g_ctx.leistungAendern = true;
+            g_ctx.entladeLeistungGesetzt = true;
+                g_ctx.entladeLeistung = atoi(optarg);
                 break;
         case 'e':
-                manuelleSpeicherladung = true;
-                ladungsMenge = atoi(optarg);
+                g_ctx.manuelleSpeicherladung = true;
+                g_ctx.ladungsMenge = atoi(optarg);
                 break;
         case 'a':
-                leistungAendern = true;
-                automatischLeistungEinstellen = true;
+                g_ctx.leistungAendern = true;
+                g_ctx.automatischLeistungEinstellen = true;
                 break;
         case 'p':
-                config = strdup(optarg);
+                g_ctx.configPath = strdup(optarg);
+                break;
+        case 't':
+                g_ctx.tagfilePath = strdup(optarg);
+                break;
+        case 'H':
+                g_ctx.historieAbfrage = true;
+                g_ctx.historieTyp = strdup(optarg);
+                if (strcmp(optarg, "day") != 0 && strcmp(optarg, "week") != 0 &&
+                    strcmp(optarg, "month") != 0 && strcmp(optarg, "year") != 0) {
+                    fprintf(stderr, "Fehler: Ungültiger History-Typ '%s'\n", optarg);
+                    fprintf(stderr, "Gültige Typen: day, week, month, year\n");
+                    exit(EXIT_FAILURE);
+                }
+                break;
+        case 'D':
+                g_ctx.historieDatum = strdup(optarg);
+                break;
+        case 'r':
+                g_ctx.werteAbfragen = true;
+                if (optarg[0] >= '0' && optarg[0] <= '9') {
+                    // Hex-Wert direkt parsen
+                    g_ctx.leseTag = strtoul(optarg, NULL, 0);
+                    // Validierung: Nur REQUEST Tags können abgefragt werden
+                    if (!isRequestTag(g_ctx.leseTag)) {
+                        fprintf(stderr, "Fehler: 0x%08X ist ein RESPONSE Tag!\n", g_ctx.leseTag);
+                        fprintf(stderr, "Sie können nur REQUEST Tags abfragen (zweites Byte < 0x80).\n");
+                        fprintf(stderr, "Beispiel: 0x01000008 (REQUEST), nicht 0x01800008 (RESPONSE)\n");
+                        exit(EXIT_FAILURE);
+                    }
+                } else {
+                    // Tag-Namen speichern für spätere Konvertierung (nach loadTagsFile)
+                    g_ctx.tagName = strdup(optarg);
+                }
+                break;
+        case 'q':
+                g_ctx.quietMode = true;
+                break;
+        case 'l':
+                g_ctx.listTags = true;
+                // Prüfe nächstes Argument als optional Kategorie
+                if (optind < argc && argv[optind][0] >= '0' && argv[optind][0] <= '9') {
+                    g_ctx.listCategory = atoi(argv[optind]);
+                    optind++;  // Skip this argument
+                    if (g_ctx.listCategory < 1 || g_ctx.listCategory > 8) {
+                        fprintf(stderr, "Fehler: Ungültige Kategorie %d (gültig: 1-8)\n", g_ctx.listCategory);
+                        fprintf(stderr, "Beispiel: ./e3dcset -l    (Übersicht)\n");
+                        fprintf(stderr, "         ./e3dcset -l 1  (EMS Tags)\n\n");
+                        usage();
+                    }
+                } else {
+                    // Keine Kategorie angegeben → Übersicht
+                    g_ctx.listCategory = 0;
+                }
                 break;
                 default:
                 usage();
@@ -695,6 +1561,29 @@ int main(int argc, char *argv[])
 
     if (optind < argc){
         usage();
+    }
+
+    // Lade Tag-Definitionen aus Datei VOR dem -l Check
+    loadTagsFile(g_ctx.tagfilePath);
+
+    // Handle -l option early (no device connection needed)
+    if (g_ctx.listTags) {
+        printTagList(g_ctx.listCategory);
+        return 0;
+    }
+    
+    // Konvertiere Tag-Namen zu Hex-Wert (nach loadTagsFile)
+    if (g_ctx.werteAbfragen && g_ctx.tagName != NULL) {
+        g_ctx.leseTag = getTagByName(g_ctx.tagName);
+        // Validierung: Nur REQUEST Tags können abgefragt werden
+        if (!isRequestTag(g_ctx.leseTag)) {
+            fprintf(stderr, "Fehler: 0x%08X ist ein RESPONSE Tag!\n", g_ctx.leseTag);
+            fprintf(stderr, "Sie können nur REQUEST Tags abfragen (zweites Byte < 0x80).\n");
+            fprintf(stderr, "Beispiel: 0x01000008 (REQUEST), nicht 0x01800008 (RESPONSE)\n");
+            exit(EXIT_FAILURE);
+        }
+        free(g_ctx.tagName);
+        g_ctx.tagName = NULL;
     }
 
     // Lese Konfigurationsdatei

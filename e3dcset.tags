@@ -1,0 +1,193 @@
+# e3dcset Tag-Definitions und Interpretationen
+# Format: TAG_NAME = HEX_WERT # Beschreibung
+# oder für Interpretationen: HEX_WERT:WERT = Interpretation
+
+[EMS]
+EMS_POWER_PV = 0x01000001 # PV-Leistung in Watt
+EMS_POWER_BAT = 0x01000002 # Batterie-Leistung (+ Laden / - Entladen)
+EMS_POWER_HOME = 0x01000003 # Hausverbrauch in Watt
+EMS_POWER_GRID = 0x01000004 # Netzleistung (+ Bezug / - Einspeisung)
+EMS_POWER_ADD = 0x01000005 # Zusätzlicher Leistungsmesser
+EMS_AUTARKY = 0x01000006 # Autarkiegrad in Prozent
+EMS_SELF_CONSUMPTION = 0x01000007 # Eigenverbrauch in Prozent
+EMS_BAT_SOC = 0x01000008 # Batterie-Ladezustand in Prozent
+EMS_COUPLING_MODE = 0x01000009 # Kopplungsmodus (AC/DC)
+EMS_STORED_ERRORS = 0x0100000A # Gespeicherte Fehlermeldungen
+EMS_MODE = 0x01000011 # EMS-Betriebsmodus
+EMS_STATUS = 0x01000040 # EMS-Status
+EMS_GET_IDLE_PERIODS = 0x01000080 # Leerlaufperioden abrufen
+EMS_GET_POWER_SETTINGS = 0x0100008B # Leistungseinstellungen abrufen
+EMS_GET_MANUAL_CHARGE = 0x0100008E # Manuelle Ladung abrufen
+EMS_START_MANUAL_CHARGE = 0x0100008F # Manuelle Ladung starten
+EMS_EMERGENCY_POWER_STATUS = 0x01000095 # Notstrom-Status
+EMS_GET_SYS_SPECS = 0x01000098 # System-Spezifikationen
+
+[BAT]
+BAT_DATA = 0x03040000 # Batterie-Daten Container
+BAT_RSOC = 0x03000001 # Relativer Ladezustand (%)
+BAT_MODULE_VOLTAGE = 0x03000002 # Modul-Spannung (V)
+BAT_CURRENT = 0x03000003 # Batterie-Strom (A)
+BAT_MAX_BAT_VOLTAGE = 0x03000004 # Maximale Batterie-Spannung (V)
+BAT_MAX_CHARGE_CURRENT = 0x03000005 # Maximaler Ladestrom (A)
+BAT_MAX_DISCHARGE_CURRENT = 0x03000007 # Maximaler Entladestrom (A)
+BAT_CHARGE_CYCLES = 0x03000008 # Anzahl Ladezyklen
+BAT_TERMINAL_VOLTAGE = 0x03000009 # Klemmenspannung (V)
+BAT_STATUS_CODE = 0x0300000A # Status-Code
+BAT_ERROR_CODE = 0x0300000B # Fehler-Code
+BAT_DEVICE_NAME = 0x0300000C # Geräte-Name
+BAT_DEVICE_STATE = 0x03060000 # Geräte-Status
+
+[PVI]
+PVI_DATA = 0x02040000 # PV-Wechselrichter Daten Container
+PVI_ON_GRID = 0x02000001 # Am Netz (true/false)
+PVI_STATE = 0x02000002 # Wechselrichter-Status
+PVI_LAST_ERROR = 0x02000003 # Letzter Fehler
+PVI_DEVICE_STATE = 0x02060000 # Geräte-Status
+PVI_TYPE = 0x02000009 # Wechselrichter-Typ
+PVI_COS_PHI = 0x02000060 # Cos Phi (Leistungsfaktor)
+PVI_VOLTAGE_MONITORING = 0x02000070 # Spannungsüberwachung
+PVI_FREQUENCY_UNDER_OVER = 0x02000078 # Frequenz Über-/Unterspannung
+PVI_SYSTEM_MODE = 0x0200007A # System-Modus
+PVI_POWER_MODE = 0x0200007E # Leistungs-Modus
+PVI_TEMPERATURE = 0x02000026 # Temperatur (°C)
+PVI_SERIAL_NUMBER = 0x02000029 # Seriennummer
+PVI_VERSION = 0x0200002B # Firmware-Version
+PVI_AC_MAX_PHASE_COUNT = 0x02000036 # Maximale Anzahl Phasen
+
+[PM]
+PM_DATA = 0x05040000 # Leistungsmesser Daten Container
+PM_POWER_L1 = 0x05000001 # Leistung Phase L1 (W)
+PM_POWER_L2 = 0x05000002 # Leistung Phase L2 (W)
+PM_POWER_L3 = 0x05000003 # Leistung Phase L3 (W)
+PM_ACTIVE_PHASES = 0x05000004 # Aktive Phasen
+PM_MODE = 0x05000005 # Betriebsmodus
+PM_ENERGY_L1 = 0x05000006 # Energie Phase L1 (Wh)
+PM_ENERGY_L2 = 0x05000007 # Energie Phase L2 (Wh)
+PM_ENERGY_L3 = 0x05000008 # Energie Phase L3 (Wh)
+PM_DEVICE_ID = 0x05000009 # Geräte-ID
+PM_ERROR_CODE = 0x0500000A # Fehler-Code
+PM_FIRMWARE_VERSION = 0x0500000C # Firmware-Version
+PM_VOLTAGE_L1 = 0x05000011 # Spannung Phase L1 (V)
+PM_VOLTAGE_L2 = 0x05000012 # Spannung Phase L2 (V)
+PM_VOLTAGE_L3 = 0x05000013 # Spannung Phase L3 (V)
+PM_TYPE = 0x05000014 # Leistungsmesser-Typ
+PM_DEVICE_STATE = 0x05060000 # Geräte-Status
+
+[WB]
+WB_DATA = 0x0E040000 # Wallbox Daten Container
+WB_ENERGY_ALL = 0x0E000001 # Gesamte geladene Energie (Wh)
+WB_ENERGY_SOLAR = 0x0E000002 # Solar geladene Energie (Wh)
+WB_SOC = 0x0E000003 # Fahrzeug-Ladezustand (%)
+WB_STATUS = 0x0E000004 # Wallbox-Status
+WB_ERROR_CODE = 0x0E000005 # Fehler-Code
+WB_MODE = 0x0E000006 # Betriebsmodus
+WB_APP_SOFTWARE = 0x0E000007 # Software-Version
+WB_DEVICE_ID = 0x0E00000B # Geräte-ID
+WB_DEVICE_STATE = 0x0E060000 # Geräte-Status
+WB_PM_POWER_L1 = 0x0E00000C # Leistung Phase L1 (W)
+WB_PM_POWER_L2 = 0x0E00000D # Leistung Phase L2 (W)
+WB_PM_POWER_L3 = 0x0E00000E # Leistung Phase L3 (W)
+
+[DCDC]
+DCDC_DATA = 0x04040000 # DC/DC-Wandler Daten Container
+DCDC_I_BAT = 0x04000001 # Batterie-Strom (A)
+DCDC_U_BAT = 0x04000002 # Batterie-Spannung (V)
+DCDC_P_BAT = 0x04000003 # Batterie-Leistung (W)
+DCDC_I_DCL = 0x04000004 # DC-Link Strom (A)
+DCDC_U_DCL = 0x04000005 # DC-Link Spannung (V)
+DCDC_P_DCL = 0x04000006 # DC-Link Leistung (W)
+DCDC_FIRMWARE_VERSION = 0x04000008 # Firmware-Version
+DCDC_FPGA_FIRMWARE = 0x04000009 # FPGA Firmware-Version
+DCDC_SERIAL_NUMBER = 0x0400000A # Seriennummer
+DCDC_BOARD_VERSION = 0x0400000B # Board-Version
+DCDC_STATUS = 0x04000010 # Status
+DCDC_DEVICE_STATE = 0x04060000 # Geräte-Status
+
+[INFO]
+INFO_SERIAL_NUMBER = 0x0A000001 # Seriennummer des Systems
+INFO_PRODUCTION_DATE = 0x0A000002 # Produktionsdatum
+INFO_MODULES_SW_VERSIONS = 0x0A000003 # Software-Versionen aller Module (Container)
+INFO_A35_SERIAL_NUMBER = 0x0A000007 # A35 Modul Seriennummer
+INFO_IP_ADDRESS = 0x0A000008 # IP-Adresse
+INFO_SUBNET_MASK = 0x0A000009 # Subnetz-Maske
+INFO_MAC_ADDRESS = 0x0A00000A # MAC-Adresse
+INFO_GATEWAY = 0x0A00000B # Gateway-Adresse
+INFO_DNS = 0x0A00000C # DNS-Server
+INFO_DHCP_STATUS = 0x0A00000D # DHCP Status
+INFO_TIME = 0x0A00000E # Systemzeit
+INFO_UTC_TIME = 0x0A00000F # UTC Zeit
+INFO_TIME_ZONE = 0x0A000010 # Zeitzone
+INFO_SW_RELEASE = 0x0A000019 # Software-Version
+
+[DB]
+DB_REQ_HISTORY_DATA_DAY = 0x06000100 # Historische Tagesdaten abfragen (Container)
+DB_REQ_HISTORY_TIME_START = 0x06000101 # Startzeitpunkt (Unix-Timestamp)
+DB_REQ_HISTORY_TIME_INTERVAL = 0x06000102 # Abtastintervall in Sekunden (min. 900)
+DB_REQ_HISTORY_TIME_SPAN = 0x06000103 # Zeitspanne in Sekunden (min. 900)
+DB_REQ_HISTORY_DATA_WEEK = 0x06000200 # Historische Wochendaten abfragen (Container)
+DB_REQ_HISTORY_DATA_MONTH = 0x06000300 # Historische Monatsdaten abfragen (Container)
+DB_REQ_HISTORY_DATA_YEAR = 0x06000400 # Historische Jahresdaten abfragen (Container)
+DB_HISTORY_DATA_DAY = 0x06800100 # Response: Tagesdaten
+DB_HISTORY_DATA_WEEK = 0x06800200 # Response: Wochendaten
+DB_HISTORY_DATA_MONTH = 0x06800300 # Response: Monatsdaten
+DB_HISTORY_DATA_YEAR = 0x06800400 # Response: Jahresdaten
+DB_SUM_CONTAINER = 0x06800010 # Response: Summen-Container
+DB_VALUE_CONTAINER = 0x06800020 # Response: Werte-Container
+DB_GRAPH_INDEX = 0x06800001 # Response: Graph-Index (Position)
+DB_BAT_POWER_IN = 0x06800002 # Response: Batterie geladen (Wh)
+DB_BAT_POWER_OUT = 0x06800003 # Response: Batterie entladen (Wh)
+DB_DC_POWER = 0x06800004 # Response: PV-Produktion (Wh)
+DB_GRID_POWER_IN = 0x06800005 # Response: Netzbezug (Wh)
+DB_GRID_POWER_OUT = 0x06800006 # Response: Netzeinspeisung (Wh)
+DB_CONSUMPTION = 0x06800007 # Response: Hausverbrauch (Wh)
+DB_BAT_CHARGE_LEVEL = 0x0680000A # Response: Batterie-Ladezustand (%)
+DB_AUTARKY = 0x0680000D # Response: Autarkiegrad (%)
+
+[INTERPRETATIONS]
+# EMS_COUPLING_MODE (0x01000009)
+0x01000009:0 = DC-gekoppelt
+0x01000009:1 = DC-gekoppelt (Multi-WR)
+0x01000009:2 = AC-gekoppelt
+0x01000009:3 = Hybrid
+0x01000009:4 = Inselbetrieb
+
+# EMS_STATUS (0x01000040) - Bitfeld
+0x01000040:0 = Kein Status gesetzt
+0x01000040:1 = Bit 0: Laden gesperrt
+0x01000040:2 = Bit 1: Entladen gesperrt
+0x01000040:4 = Bit 2: Notstrom möglich
+0x01000040:8 = Bit 3: Wetterregelung aktiv
+0x01000040:16 = Bit 4: Leistungsabregelung aktiv
+0x01000040:32 = Bit 5: Ladesperrzeit aktiv
+0x01000040:64 = Bit 6: Entladesperrzeit aktiv
+0x01000040:128 = Bit 7: Wallbox-Vorrang
+0x01000040:256 = Bit 8: Notstrom-Test läuft
+
+# EMS_MODE (0x01000011)
+0x01000011:0 = Normal/Automatik
+0x01000011:1 = Leerlauf (keine Ladung/Entladung)
+0x01000011:2 = Entladung
+0x01000011:3 = Ladung (von PV)
+0x01000011:4 = Netzladung
+
+# EMS_EMERGENCY_POWER_STATUS (0x01000095)
+0x01000095:0 = Nicht möglich
+0x01000095:1 = Aktiv
+0x01000095:2 = Nicht aktiv
+0x01000095:3 = Nicht verfügbar
+0x01000095:4 = Inselbetrieb
+
+# PVI_ON_GRID (0x02000001) - Boolean
+0x02000001:0 = Nein
+0x02000001:1 = Ja
+
+# EMS_POWER_LIMITS_USED - Boolean
+0x01800065:0 = Nein
+0x01800065:1 = Ja
+
+# Status/Error Codes - 0 bedeutet immer OK
+0x0300000A:0 = OK (kein Fehler)
+0x0300000B:0 = OK (kein Fehler)
+0x0500000A:0 = OK (kein Fehler)
+0x0E000005:0 = OK (kein Fehler)
+0x04000010:0 = OK (kein Fehler)

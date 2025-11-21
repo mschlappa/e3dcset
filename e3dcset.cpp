@@ -246,18 +246,41 @@ void loadTagsFile(const char* filename) {
     DEBUG("Tag-Datei '%s' erfolgreich geladen\n", filename);
 }
 
+// Berechnet Tage im Monat (unter Berücksichtigung von Schaltjahren)
+int getDaysInMonth(int month, int year) {
+    // month: 1-12, year: 4-stellige Jahreszahl
+    int daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    
+    if (month < 1 || month > 12) return 31;
+    
+    int days = daysInMonth[month - 1];
+    
+    // Schaltjahr-Check für Februar
+    if (month == 2) {
+        // Schaltjahr: Jahr teilbar durch 4, aber nicht durch 100 (außer teilbar durch 400)
+        if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+            days = 29;
+        }
+    }
+    
+    return days;
+}
+
 // Konvertiert Datum zu Unix-Timestamp mit History-Typ-Anpassung (Anfang der Periode)
 time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
     struct tm tm_date = {0};
     time_t now;
+    int year = 0, month = 0;  // Speichern für Monats-Berechnung
     
     if (strcmp(dateStr, "today") == 0) {
         time(&now);
         struct tm* tm_now = localtime(&now);
         tm_date = *tm_now;
+        year = tm_now->tm_year + 1900;
+        month = tm_now->tm_mon + 1;
     } else {
         // Parse YYYY-MM-DD Format
-        int year, month, day;
+        int day;
         if (sscanf(dateStr, "%d-%d-%d", &year, &month, &day) != 3) {
             fprintf(stderr, "Fehler: Ungültiges Datumsformat '%s'\n", dateStr);
             fprintf(stderr, "Verwenden Sie 'today' oder 'YYYY-MM-DD' (z.B. 2024-11-20)\n");
@@ -288,6 +311,10 @@ time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
     } else if (strcmp(historyType, "month") == 0) {
         // Gehe zum 1. des Monats
         tm_date.tm_mday = 1;
+        // Speichere die Tage des Monats global für später (wird in createRequestExample verwendet)
+        int daysInMonth = getDaysInMonth(month, year);
+        g_ctx.historieSpan = daysInMonth * 86400;  // Tage * Sekunden pro Tag
+        DEBUG("Monat %d/%d hat %d Tage, SPAN = %u Sekunden\n", month, year, daysInMonth, g_ctx.historieSpan);
     } else if (strcmp(historyType, "year") == 0) {
         // Gehe zum 1. Januar
         tm_date.tm_mon = 0;
@@ -350,7 +377,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 } else if (strcmp(g_ctx.historieTyp, "month") == 0) {
                     historyTag = TAG_DB_REQ_HISTORY_DATA_MONTH;
                     g_ctx.historieInterval = HISTORY_INTERVAL_MONTH;
-                    g_ctx.historieSpan = HISTORY_SPAN_MONTH;
+                    // historieSpan wird dynamisch in dateToTimestamp() berechnet!
                 } else if (strcmp(g_ctx.historieTyp, "year") == 0) {
                     historyTag = TAG_DB_REQ_HISTORY_DATA_YEAR;
                     g_ctx.historieInterval = HISTORY_INTERVAL_YEAR;

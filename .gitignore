@@ -14,4 +14,5 @@ e3dcset
 .DS_Store
 
 # Replit project metadata
+.replit
 replit.md

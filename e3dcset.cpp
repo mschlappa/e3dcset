@@ -24,7 +24,7 @@
 #define HISTORY_INTERVAL_WEEK     3600    // 1 hour
 #define HISTORY_SPAN_WEEK         604800  // 7 days
 #define HISTORY_INTERVAL_MONTH    86400   // 1 day
-#define HISTORY_SPAN_MONTH        2592000 // 30 days
+#define HISTORY_SPAN_MONTH        2678400 // 31 days
 #define HISTORY_INTERVAL_YEAR     604800  // 1 week
 #define HISTORY_SPAN_YEAR         31536000// 365 days
 

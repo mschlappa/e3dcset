@@ -562,6 +562,18 @@ const char* getTagDescription(uint32_t tag) {
     return NULL;
 }
 
+// Format millisecond Unix epoch timestamp to human-readable string
+std::string formatTimestamp(uint64_t milliseconds) {
+    time_t seconds = milliseconds / 1000;
+    struct tm timeinfo;
+    localtime_r(&seconds, &timeinfo);
+    
+    char buffer[64];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    
+    return std::string(buffer);
+}
+
 const char* interpretValue(uint32_t tag, int64_t value) {
     // Suche Interpretation in geladenen Daten aus e3dcset.tags
     char key[64];
@@ -869,9 +881,17 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                         case RSCP::eTypeInt64:
                                             printf("%20lld\n", (long long)protocol->getValueAsInt64(&tagValuePair.second));
                                             break;
-                                        case RSCP::eTypeUInt64:
-                                            printf("%20llu\n", (unsigned long long)protocol->getValueAsUInt64(&tagValuePair.second));
+                                        case RSCP::eTypeUInt64: {
+                                            uint64_t value = protocol->getValueAsUInt64(&tagValuePair.second);
+                                            // Special formatting for timestamp tags
+                                            if (tagValuePair.first == TAG_BAT_DCB_LAST_MESSAGE_TIMESTAMP) {
+                                                std::string formatted = formatTimestamp(value);
+                                                printf("%20s\n", formatted.c_str());
+                                            } else {
+                                                printf("%20llu\n", (unsigned long long)value);
+                                            }
                                             break;
+                                        }
                                         case RSCP::eTypeFloat32:
                                             printf("%20.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
                                             break;

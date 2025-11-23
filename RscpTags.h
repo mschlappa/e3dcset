@@ -218,6 +218,8 @@
 #define TAG_BAT_REQ_READY_FOR_SHUTDOWN                          0x0300001E
 #define TAG_BAT_REQ_INFO                                        0x03000020
 #define TAG_BAT_REQ_TRAINING_MODE                               0x03000021
+#define TAG_BAT_REQ_DCB_INFO                                    0x03000042
+#define TAG_BAT_DCB_INFO                                        0x03800042
 #define TAG_BAT_DCB_INDEX                                       0x03800100
 #define TAG_BAT_DCB_LAST_MESSAGE_TIMESTAMP                      0x03800101
 #define TAG_BAT_DCB_MAX_CHARGE_VOLTAGE                          0x03800102

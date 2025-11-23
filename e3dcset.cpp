@@ -399,7 +399,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_INFO);           // Info Container (kann DCB-Daten enthalten)
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO);       // DCB-Info Container (gibt Array von Containern zurück)
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);
@@ -758,43 +758,144 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     break;
                 }
                 case RSCP::eTypeContainer: {
-                    // Handle nested containers (e.g., BAT_INFO with DCB data)
-                    if (batteryData[i].tag == TAG_BAT_INFO && g_ctx.modulInfoDump && !g_ctx.quietMode) {
-                        printf("\n\n  === DCB Zellblöcke ===\n");
+                    // Nested containers could be handled here if needed
+                    // For now, DCB data is handled via TAG_BAT_DCB_INFO response
+                    if (!g_ctx.quietMode) {
+                        printf("(Container mit %zu Elementen)\n", 
+                               protocol->getValueAsContainer(&batteryData[i]).size());
+                    }
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Unbekannter Datentyp %d\n", batteryData[i].dataType);
+                    }
+                    break;
+            }
+            
+            // In quiet mode (single tag query), stop after printing the requested value
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && foundRequestedTag) {
+                break;
+            }
+        }
+        
+        // In quiet mode (single tag query), if we didn't find the requested tag, output error
+        if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
+            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
+        }
+        
+        // Clean up vector elements properly
+        for(size_t i = 0; i < batteryData.size(); ++i) {
+            protocol->destroyValueData(&batteryData[i]);
+        }
+        
+        g_ctx.batContainerQuery = false;  // Reset flag after successful processing
+        break;
+       }
+       
+        case TAG_BAT_DCB_INFO: {        // response for TAG_BAT_REQ_DCB_INFO
+            if (!g_ctx.modulInfoDump || g_ctx.quietMode) {
+                break;  // Only process in module info dump mode
+            }
+            
+            // TAG_BAT_DCB_INFO can be either a single container (1 DCB) or a container of containers (multiple DCBs)
+            // We need to handle both cases
+            
+            // First, check if this is a container of containers or just a single DCB container
+            std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(response);
+            
+            // Check if the first element is BAT_DCB_INDEX (single DCB) or another container (multiple DCBs)
+            if (dcbInfoData.size() > 0) {
+                // If first element is BAT_DCB_INDEX, it's a single DCB container
+                // Otherwise, it might be multiple containers
+                
+                bool isSingleDCB = (dcbInfoData[0].tag == TAG_BAT_DCB_INDEX);
+                
+                if (isSingleDCB) {
+                    // Single DCB: process directly - reuse the same logic as multiple DCBs
+                    std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                    int8_t currentDcbIndex = -1;
+                    
+                    for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                        uint32_t tag = dcbInfoData[i].tag;
                         
-                        std::vector<SRscpValue> infoData = protocol->getValueAsContainer(&batteryData[i]);
-                        
-                        // Group DCB data by DCB_INDEX
-                        // Using a map to keep DCBs sorted by index
-                        std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
-                        int8_t currentDcbIndex = -1;  // Start with -1 to detect first DCB_INDEX
-                        
-                        for(size_t j = 0; j < infoData.size(); ++j) {
-                            uint32_t tag = infoData[j].tag;
-                            
-                            if (tag == TAG_BAT_DCB_INDEX) {
-                                currentDcbIndex = protocol->getValueAsUChar8(&infoData[j]);
-                                DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
-                            } else if (currentDcbIndex >= 0) {
-                                // Only store data if we have seen a DCB_INDEX
-                                // Check if this is a DCB-related tag (0x038xxxxx range)
-                                if ((tag & 0xFFF00000) == 0x03800000) {
-                                    dcbData[currentDcbIndex].push_back(std::make_pair(tag, infoData[j]));
-                                    DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
-                                }
+                        if (tag == TAG_BAT_DCB_INDEX) {
+                            currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
+                        } else if (currentDcbIndex >= 0) {
+                            if ((tag & 0xFFF00000) == 0x03800000) {
+                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
                             }
                         }
-                        
-                        // Print grouped DCB data
+                    }
+                    
+                    // Print the single DCB
+                    if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        printf("\n  === DCB Zellblöcke ===\n");
                         for (auto& dcbPair : dcbData) {
                             printf("  Zellblock %u:\n", dcbPair.first);
                             
                             for (auto& tagValuePair : dcbPair.second) {
                                 const char* label = getTagDescription(tagValuePair.first);
                                 if (label) {
-                                    printf("    %-28s ", label);
+                                    printf("    %-35s ", label);
                                 } else {
-                                    printf("    Tag 0x%08X:                ", tagValuePair.first);
+                                    printf("    Tag 0x%08X:                     ", tagValuePair.first);
+                                }
+                                
+                                switch(tagValuePair.second.dataType) {
+                                    case RSCP::eTypeFloat32:
+                                        printf("%.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeUChar8:
+                                        printf("%u\n", protocol->getValueAsUChar8(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeUInt32:
+                                        printf("%u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeInt32:
+                                        printf("%d\n", protocol->getValueAsInt32(&tagValuePair.second));
+                                        break;
+                                    default:
+                                        printf("(Typ %d)\n", tagValuePair.second.dataType);
+                                        break;
+                                }
+                            }
+                            printf("\n");
+                        }
+                    }
+                } else {
+                    // Multiple DCBs: each element might be a container
+                    // Group data by DCB_INDEX
+                    std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                    int8_t currentDcbIndex = -1;
+                    
+                    for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                        uint32_t tag = dcbInfoData[i].tag;
+                        
+                        if (tag == TAG_BAT_DCB_INDEX) {
+                            currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
+                            DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
+                        } else if (currentDcbIndex >= 0) {
+                            // Check if this is a DCB-related tag
+                            if ((tag & 0xFFF00000) == 0x03800000) {
+                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
+                                DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
+                            }
+                        }
+                    }
+                    
+                    // Print grouped DCB data
+                    if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        printf("\n  === DCB Zellblöcke ===\n");
+                        for (auto& dcbPair : dcbData) {
+                            printf("  Zellblock %u:\n", dcbPair.first);
+                            
+                            for (auto& tagValuePair : dcbPair.second) {
+                                const char* label = getTagDescription(tagValuePair.first);
+                                if (label) {
+                                    printf("    %-35s ", label);
+                                } else {
+                                    printf("    Tag 0x%08X:                     ", tagValuePair.first);
                                 }
                                 
                                 // Print value based on type
@@ -826,40 +927,17 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             }
                             printf("\n");
                         }
-                        
-                        // Clean up
-                        for(size_t j = 0; j < infoData.size(); ++j) {
-                            protocol->destroyValueData(&infoData[j]);
-                        }
                     }
-                    break;
                 }
-                default:
-                    if (!g_ctx.quietMode) {
-                        printf("Unbekannter Datentyp %d\n", batteryData[i].dataType);
-                    }
-                    break;
             }
             
-            // In quiet mode (single tag query), stop after printing the requested value
-            if (g_ctx.quietMode && !g_ctx.modulInfoDump && foundRequestedTag) {
-                break;
+            // Clean up
+            for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                protocol->destroyValueData(&dcbInfoData[i]);
             }
+            
+            break;
         }
-        
-        // In quiet mode (single tag query), if we didn't find the requested tag, output error
-        if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
-            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
-        }
-        
-        // Clean up vector elements properly
-        for(size_t i = 0; i < batteryData.size(); ++i) {
-            protocol->destroyValueData(&batteryData[i]);
-        }
-        
-        g_ctx.batContainerQuery = false;  // Reset flag after successful processing
-        break;
-       }
 
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;

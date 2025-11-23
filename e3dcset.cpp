@@ -58,6 +58,7 @@ struct CommandContext {
     int listCategory;
     bool historieAbfrage;
     bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
+    bool modulInfoDump;      // True wenn alle Modul-Werte abgefragt werden (-m)
     
     // Power and energy settings
     uint32_t ladungsMenge;
@@ -90,6 +91,8 @@ struct CommandContext {
         listTags(false),
         listCategory(0),
         historieAbfrage(false),
+        batContainerQuery(false),
+        modulInfoDump(false),
         ladungsMenge(0),
         ladeLeistung(0),
         entladeLeistung(0),
@@ -378,6 +381,29 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 }
         }
         
+        if (g_ctx.modulInfoDump){
+                DEBUG("Modul-Info-Dump für Modul %u angefordert\n", g_ctx.batIndex);
+                
+                // Create BAT_REQ_DATA container with multiple tags
+                SRscpValue batContainer;
+                protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
+                protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
+                
+                // Add all common battery tags
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_CURRENT);        // Strom
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_MODULE_VOLTAGE); // Modulspannung
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
+                
+                protocol.appendValue(&rootValue, batContainer);
+                protocol.destroyValueData(batContainer);
+                g_ctx.batContainerQuery = true;
+        }
+        
         if (g_ctx.historieAbfrage){
                 DEBUG("Anfrage Historie: Typ=%s, Datum=%s\n", 
                       g_ctx.historieTyp, g_ctx.historieDatum);
@@ -471,6 +497,19 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     protocol.destroyValueData(rootValue);
 
     return 0;
+}
+
+// Get tag description from loaded tags (search all categories)
+const char* getTagDescription(uint32_t tag) {
+    // Search through all categories
+    for (auto& categoryPair : loadedTags) {
+        for (auto& tagInfo : categoryPair.second) {
+            if (tagInfo.hex == tag) {
+                return tagInfo.description.c_str();
+            }
+        }
+    }
+    return NULL;
 }
 
 const char* interpretValue(uint32_t tag, int64_t value) {
@@ -599,11 +638,16 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         
         // Calculate expected response tag from request tag (REQUEST 0x03xxxx -> RESPONSE 0x38xxxx)
         uint32_t expectedResponseTag = 0;
-        if (g_ctx.batContainerQuery) {
+        if (g_ctx.batContainerQuery && !g_ctx.modulInfoDump) {
             expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
         }
         
         bool foundRequestedTag = false;
+        
+        // Print header for module info dump
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+            printf("Batterie Modul %u:\n", g_ctx.batIndex);
+        }
         
         for(size_t i = 0; i < batteryData.size(); ++i) {
             // Check for errors first - stop processing if error found
@@ -624,8 +668,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 continue;
             }
             
-            // In quiet mode, only process the requested tag's value
-            if (g_ctx.quietMode && batteryData[i].tag != expectedResponseTag) {
+            // In quiet mode (single tag query), only process the requested tag's value
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && batteryData[i].tag != expectedResponseTag) {
                 continue;
             }
             
@@ -634,9 +678,19 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 foundRequestedTag = true;
             }
             
-            // Print tag prefix only in non-quiet mode
+            // Print tag prefix - formatted for module dump, raw for single query
             if (!g_ctx.quietMode) {
-                printf("Tag 0x%08X: ", batteryData[i].tag);
+                if (g_ctx.modulInfoDump) {
+                    // Friendly label for module info dump
+                    const char* label = getTagDescription(batteryData[i].tag);
+                    if (label) {
+                        printf("  %-30s ", label);
+                    } else {
+                        printf("  Tag 0x%08X:                  ", batteryData[i].tag);
+                    }
+                } else {
+                    printf("Tag 0x%08X: ", batteryData[i].tag);
+                }
             }
             
             // Process battery value based on datatype - uses printFormattedValue for interpretations
@@ -690,14 +744,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     break;
             }
             
-            // In quiet mode, stop after printing the requested value
-            if (g_ctx.quietMode && foundRequestedTag) {
+            // In quiet mode (single tag query), stop after printing the requested value
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && foundRequestedTag) {
                 break;
             }
         }
         
-        // In quiet mode, if we didn't find the requested tag, output error
-        if (g_ctx.quietMode && !foundRequestedTag) {
+        // In quiet mode (single tag query), if we didn't find the requested tag, output error
+        if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
             fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
         }
         
@@ -1373,6 +1427,7 @@ void printTagList(int category) {
 void usage(void){
     fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
     fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -m <Modul-Index> [-p Pfad zur Konfigurationsdatei]\n");
     fprintf(stderr, "          e3dcset -l [kategorie]\n");
     fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
     fprintf(stderr, "   Optionen:\n");
@@ -1382,13 +1437,14 @@ void usage(void){
     fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
     fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
     fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
+    fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
     fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
     fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
     fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
     fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
     fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
-    fprintf(stderr, "   Hinweis: -r und -H können nicht mit -c, -d, -e oder -a kombiniert werden\n\n");
+    fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e oder -a kombiniert werden\n\n");
     fprintf(stderr, "   Beispiele:\n");
     fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
     fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
@@ -1397,6 +1453,8 @@ void usage(void){
     fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
+    fprintf(stderr, "     e3dcset -m 0                    # Alle Werte von Modul 0\n");
+    fprintf(stderr, "     e3dcset -m 1                    # Alle Werte von Modul 1\n");
     fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
     fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
@@ -1588,7 +1646,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:r:i:qlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
@@ -1647,6 +1705,10 @@ int main(int argc, char *argv[])
                 }
                 break;
         case 'i':
+                g_ctx.batIndex = (uint16_t)atoi(optarg);
+                break;
+        case 'm':
+                g_ctx.modulInfoDump = true;
                 g_ctx.batIndex = (uint16_t)atoi(optarg);
                 break;
         case 'q':

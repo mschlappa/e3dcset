@@ -758,9 +758,70 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     break;
                 }
                 case RSCP::eTypeContainer: {
-                    // Nested containers could be handled here if needed
-                    // For now, DCB data is handled via TAG_BAT_DCB_INFO response
-                    if (!g_ctx.quietMode) {
+                    // Handle nested containers - especially TAG_BAT_DCB_INFO
+                    if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump && !g_ctx.quietMode) {
+                        std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(&batteryData[i]);
+                        
+                        // Group DCB data by DCB_INDEX
+                        std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                        int8_t currentDcbIndex = -1;
+                        
+                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
+                            uint32_t tag = dcbInfoData[j].tag;
+                            
+                            if (tag == TAG_BAT_DCB_INDEX) {
+                                currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[j]);
+                                DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
+                            } else if (currentDcbIndex >= 0) {
+                                // Check if this is a DCB-related tag
+                                if ((tag & 0xFFF00000) == 0x03800000) {
+                                    dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[j]));
+                                    DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
+                                }
+                            }
+                        }
+                        
+                        // Print grouped DCB data
+                        if (dcbData.size() > 0) {
+                            printf("\n\n  === DCB Zellblöcke ===\n");
+                            for (auto& dcbPair : dcbData) {
+                                printf("  Zellblock %u:\n", dcbPair.first);
+                                
+                                for (auto& tagValuePair : dcbPair.second) {
+                                    const char* label = getTagDescription(tagValuePair.first);
+                                    if (label) {
+                                        printf("    %-35s ", label);
+                                    } else {
+                                        printf("    Tag 0x%08X:                     ", tagValuePair.first);
+                                    }
+                                    
+                                    switch(tagValuePair.second.dataType) {
+                                        case RSCP::eTypeFloat32:
+                                            printf("%.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUChar8:
+                                            printf("%u\n", protocol->getValueAsUChar8(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt32:
+                                            printf("%u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeInt32:
+                                            printf("%d\n", protocol->getValueAsInt32(&tagValuePair.second));
+                                            break;
+                                        default:
+                                            printf("(Typ %d)\n", tagValuePair.second.dataType);
+                                            break;
+                                    }
+                                }
+                                printf("\n");
+                            }
+                        }
+                        
+                        // Clean up
+                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
+                            protocol->destroyValueData(&dcbInfoData[j]);
+                        }
+                    } else if (!g_ctx.quietMode) {
                         printf("(Container mit %zu Elementen)\n", 
                                protocol->getValueAsContainer(&batteryData[i]).size());
                     }

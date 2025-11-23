@@ -247,6 +247,16 @@
 #define TAG_BAT_DCB_FW_VERSION                                  0x03800122
 #define TAG_BAT_DCB_DATA_TABLE_VERSION                          0x03800123
 #define TAG_BAT_DCB_PCB_VERSION                                 0x03800124
+#define TAG_BAT_DCB_NR_SERIES_CELL                              0x03800300
+#define TAG_BAT_DCB_NR_PARALLEL_CELL                            0x03800301
+#define TAG_BAT_DCB_MANUFACTURE_NAME                            0x03800302
+#define TAG_BAT_DCB_DEVICE_NAME                                 0x03800303
+#define TAG_BAT_DCB_SERIALCODE                                  0x03800304
+#define TAG_BAT_DCB_NR_SENSOR                                   0x03800305
+#define TAG_BAT_DCB_STATUS                                      0x03800306
+#define TAG_BAT_DCB_WARNING                                     0x03800307
+#define TAG_BAT_DCB_ALARM                                       0x03800308
+#define TAG_BAT_DCB_ERROR                                       0x03800309
 #define TAG_BAT_REQ_DEVICE_STATE                                0x03060000
 #define TAG_BAT_DEVICE_STATE                                    0x03860000
 #define TAG_BAT_DEVICE_CONNECTED                                0x03860001

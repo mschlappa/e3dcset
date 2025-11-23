@@ -417,8 +417,6 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 
                 if (g_ctx.isFirstModuleDumpRequest) {
                     // FIRST REQUEST: Get battery-level data + DCB_COUNT
-                    DEBUG("Modul-Info-Dump für Modul %u - ERSTE Anfrage (Battery-Level + DCB_COUNT)\n", g_ctx.batIndex);
-                    
                     protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
                     protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
                     protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
@@ -430,9 +428,6 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                     protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs - CRITICAL!
                 } else {
                     // SUBSEQUENT REQUESTS: Get specific DCB data
-                    DEBUG("Modul-Info-Dump für Modul %u - DCB #%u Anfrage\n", g_ctx.batIndex, g_ctx.currentDCBIndex);
-                    
-                    // Request DCB info with index as VALUE (like rscp2mqtt does)
                     protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO, (uint8_t)g_ctx.currentDCBIndex);
                 }
                 
@@ -728,14 +723,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             if (batteryData[i].tag == TAG_BAT_DCB_COUNT && g_ctx.modulInfoDump) {
                 uint8_t dcbCount = protocol->getValueAsUChar8(&batteryData[i]);
                 g_ctx.totalDCBs = dcbCount;
-                DEBUG("DCB_COUNT empfangen: %u DCBs vorhanden\n", dcbCount);
                 
                 // If we have DCBs and this is the first request, set up the multi-request loop
                 if (dcbCount > 0 && g_ctx.isFirstModuleDumpRequest) {
                     g_ctx.needMoreDCBRequests = true;
                     g_ctx.currentDCBIndex = 0;
                     g_ctx.isFirstModuleDumpRequest = false;
-                    DEBUG("Weitere DCB-Requests erforderlich: %u DCBs\n", dcbCount);
                 } else if (dcbCount == 0) {
                     // No DCBs - reset state
                     g_ctx.needMoreDCBRequests = false;
@@ -818,12 +811,6 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump) {
                         std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(&batteryData[i]);
                         
-                        // DEBUG: Print all tags in the container to understand structure
-                        DEBUG("=== DCB_INFO Container hat %zu Elemente ===\n", dcbInfoData.size());
-                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
-                            DEBUG("  [%zu] Tag 0x%08X, Typ %d\n", j, dcbInfoData[j].tag, dcbInfoData[j].dataType);
-                        }
-                        
                         // Group DCB data by DCB_INDEX (ALWAYS parse, regardless of quiet mode)
                         std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
                         int8_t currentDcbIndex = -1;
@@ -834,12 +821,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             if (tag == TAG_BAT_DCB_INDEX) {
                                 currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[j]);
                                 receivedDCBData = true;  // CRITICAL: Set flag regardless of output mode!
-                                DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
                             } else if (currentDcbIndex >= 0) {
                                 // Check if this is a DCB-related tag
                                 if ((tag & 0xFFF00000) == 0x03800000) {
                                     dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[j]));
-                                    DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
                                 }
                             }
                         }
@@ -912,14 +897,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         // Only increment if we actually received DCB data (not just battery-level response)
         if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump && receivedDCBData) {
             g_ctx.currentDCBIndex++;
-            DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
-                  g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
             
             // Check if we've queried all DCBs
             if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
                 g_ctx.needMoreDCBRequests = false;
                 g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
-                DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
             }
         }
         
@@ -1636,15 +1618,9 @@ static void mainLoop(void)
                 
                 // After first receive, check if we need more DCB requests
                 if (counter > 0) {
-                    if (g_ctx.needMoreDCBRequests) {
-                        // Continue loop for next DCB request
-                        DEBUG("Multi-DCB-Request läuft weiter: Index %u von %u\n", 
-                              g_ctx.currentDCBIndex, g_ctx.totalDCBs);
-                        // Loop continues automatically
-                    } else {
+                    if (!g_ctx.needMoreDCBRequests) {
                         // No more requests needed - stop
                         bStopExecution = true;
-                        DEBUG("Keine weiteren Requests erforderlich - beende mainLoop\n");
                     }
                 }
             }

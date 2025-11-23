@@ -726,8 +726,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 return -1;  // Stop processing after error
             }
             
-            // Skip BAT_INDEX in output
-            if (batteryData[i].tag == TAG_BAT_INDEX) {
+            // Skip BAT_INDEX and TAG_BAT_DCB_INFO in output (DCB_INFO is processed internally)
+            if (batteryData[i].tag == TAG_BAT_INDEX || batteryData[i].tag == TAG_BAT_DCB_INFO) {
                 continue;
             }
             
@@ -884,10 +884,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         
                         // Print grouped DCB data (only if NOT in quiet mode)
                         if (!g_ctx.quietMode && dcbData.size() > 0) {
-                            printf("\n\n  === DCB Zellblöcke ===\n");
                             for (auto& dcbPair : dcbData) {
-                                printf("  Zellblock %u:\n", dcbPair.first);
-                                
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {

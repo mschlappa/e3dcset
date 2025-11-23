@@ -850,7 +850,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {
-                                        printf("    %-27s", label);
+                                        printf("    %-22s", label);
                                     } else {
                                         printf("    Tag 0x%08X:          ", tagValuePair.first);
                                     }

@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <strings.h>
 #include <time.h>
+#include <cmath>
 #include <map>
 #include <string>
 #include <vector>
@@ -600,6 +601,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
         }
         
+        bool foundRequestedTag = false;
+        
         for(size_t i = 0; i < batteryData.size(); ++i) {
             // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
@@ -620,9 +623,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 continue;
             }
             
-            // In quiet mode, only output the requested tag's value
+            // In quiet mode, only process the requested tag's value
             if (g_ctx.quietMode && batteryData[i].tag != expectedResponseTag) {
                 continue;
+            }
+            
+            // Mark that we found the requested tag
+            if (batteryData[i].tag == expectedResponseTag) {
+                foundRequestedTag = true;
             }
             
             // Print tag prefix only in non-quiet mode
@@ -636,8 +644,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     float value = protocol->getValueAsFloat32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%.2f", value);
-                    // Use float value directly for interpretations (don't truncate to int64_t)
-                    const char* interp = interpretValue(batteryData[i].tag, (int64_t)value);
+                    // Use std::llround for proper rounding (handles negative values)
+                    int64_t roundedValue = std::llround(value);
+                    const char* interp = interpretValue(batteryData[i].tag, roundedValue);
                     if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (interp) {
@@ -681,9 +690,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             }
             
             // In quiet mode, stop after printing the requested value
-            if (g_ctx.quietMode) {
+            if (g_ctx.quietMode && foundRequestedTag) {
                 break;
             }
+        }
+        
+        // In quiet mode, if we didn't find the requested tag, output error
+        if (g_ctx.quietMode && !foundRequestedTag) {
+            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
         }
         
         // Clean up vector elements properly

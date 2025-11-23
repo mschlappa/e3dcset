@@ -1591,7 +1591,7 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
 
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage){
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }

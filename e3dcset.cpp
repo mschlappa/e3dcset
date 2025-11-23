@@ -757,6 +757,76 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     printf("%s\n", str.c_str());
                     break;
                 }
+                case RSCP::eTypeContainer: {
+                    // Handle nested containers (e.g., BAT_INFO with DCB data)
+                    if (batteryData[i].tag == TAG_BAT_INFO && g_ctx.modulInfoDump && !g_ctx.quietMode) {
+                        printf("\n\n  === DCB Zellblöcke ===\n");
+                        
+                        std::vector<SRscpValue> infoData = protocol->getValueAsContainer(&batteryData[i]);
+                        
+                        // Group DCB data by DCB_INDEX
+                        std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                        uint8_t currentDcbIndex = 0;
+                        
+                        for(size_t j = 0; j < infoData.size(); ++j) {
+                            if (infoData[j].tag == TAG_BAT_DCB_INDEX) {
+                                currentDcbIndex = protocol->getValueAsUChar8(&infoData[j]);
+                            } else {
+                                // Store tag and value (copy tag to avoid packed field issue)
+                                uint32_t tag = infoData[j].tag;
+                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, infoData[j]));
+                            }
+                        }
+                        
+                        // Print grouped DCB data
+                        for (auto& dcbPair : dcbData) {
+                            printf("  Zellblock %u:\n", dcbPair.first);
+                            
+                            for (auto& tagValuePair : dcbPair.second) {
+                                const char* label = getTagDescription(tagValuePair.first);
+                                if (label) {
+                                    printf("    %-28s ", label);
+                                } else {
+                                    printf("    Tag 0x%08X:                ", tagValuePair.first);
+                                }
+                                
+                                // Print value based on type
+                                switch(tagValuePair.second.dataType) {
+                                    case RSCP::eTypeFloat32: {
+                                        float val = protocol->getValueAsFloat32(&tagValuePair.second);
+                                        printf("%.2f\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeUChar8: {
+                                        uint8_t val = protocol->getValueAsUChar8(&tagValuePair.second);
+                                        printf("%u\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeUInt32: {
+                                        uint32_t val = protocol->getValueAsUInt32(&tagValuePair.second);
+                                        printf("%u\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeInt32: {
+                                        int32_t val = protocol->getValueAsInt32(&tagValuePair.second);
+                                        printf("%d\n", val);
+                                        break;
+                                    }
+                                    default:
+                                        printf("(Typ %d)\n", tagValuePair.second.dataType);
+                                        break;
+                                }
+                            }
+                            printf("\n");
+                        }
+                        
+                        // Clean up
+                        for(size_t j = 0; j < infoData.size(); ++j) {
+                            protocol->destroyValueData(&infoData[j]);
+                        }
+                    }
+                    break;
+                }
                 default:
                     if (!g_ctx.quietMode) {
                         printf("Unbekannter Datentyp %d\n", batteryData[i].dataType);
@@ -783,79 +853,6 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         g_ctx.batContainerQuery = false;  // Reset flag after successful processing
         break;
        }
-
-    case TAG_BAT_INFO: {        // response for TAG_BAT_REQ_INFO - may contain DCB data
-        if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
-            printf("\n  === DCB Zellblöcke ===\n");
-        }
-        
-        std::vector<SRscpValue> infoData = protocol->getValueAsContainer(response);
-        
-        // Group DCB data by DCB_INDEX
-        std::map<uint8_t, std::vector<SRscpValue>> dcbData;
-        uint8_t currentDcbIndex = 0;
-        
-        for(size_t i = 0; i < infoData.size(); ++i) {
-            if (infoData[i].tag == TAG_BAT_DCB_INDEX) {
-                currentDcbIndex = protocol->getValueAsUChar8(&infoData[i]);
-            } else if ((infoData[i].tag & 0xFF800000) == 0x03800000) {
-                // This is a DCB-related tag (0x038xxxxx)
-                dcbData[currentDcbIndex].push_back(infoData[i]);
-            }
-        }
-        
-        // Print grouped DCB data
-        for (auto& dcbPair : dcbData) {
-            if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
-                printf("  Zellblock %u:\n", dcbPair.first);
-            }
-            
-            for (auto& value : dcbPair.second) {
-                if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
-                    const char* label = getTagDescription(value.tag);
-                    if (label) {
-                        printf("    %-28s ", label);
-                    } else {
-                        printf("    Tag 0x%08X:                ", value.tag);
-                    }
-                }
-                
-                // Print value based on type
-                switch(value.dataType) {
-                    case RSCP::eTypeFloat32: {
-                        float val = protocol->getValueAsFloat32(&value);
-                        printf("%.2f\n", val);
-                        break;
-                    }
-                    case RSCP::eTypeUChar8: {
-                        uint8_t val = protocol->getValueAsUChar8(&value);
-                        printf("%u\n", val);
-                        break;
-                    }
-                    case RSCP::eTypeUInt32: {
-                        uint32_t val = protocol->getValueAsUInt32(&value);
-                        printf("%u\n", val);
-                        break;
-                    }
-                    case RSCP::eTypeInt32: {
-                        int32_t val = protocol->getValueAsInt32(&value);
-                        printf("%d\n", val);
-                        break;
-                    }
-                    default:
-                        printf("(Typ %d)\n", value.dataType);
-                        break;
-                }
-            }
-        }
-        
-        // Clean up
-        for(size_t i = 0; i < infoData.size(); ++i) {
-            protocol->destroyValueData(&infoData[i]);
-        }
-        
-        break;
-    }
 
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;

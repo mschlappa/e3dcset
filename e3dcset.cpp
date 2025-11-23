@@ -882,6 +882,20 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         for(size_t j = 0; j < dcbInfoData.size(); ++j) {
                             protocol->destroyValueData(&dcbInfoData[j]);
                         }
+                        
+                        // After processing DCB response in BAT_DATA, check if we need more DCB requests
+                        if (g_ctx.needMoreDCBRequests) {
+                            g_ctx.currentDCBIndex++;
+                            DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
+                                  g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
+                            
+                            // Check if we've queried all DCBs
+                            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                                g_ctx.needMoreDCBRequests = false;
+                                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                                DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
+                            }
+                        }
                     } else if (!g_ctx.quietMode) {
                         printf("(Container mit %zu Elementen)\n", 
                                protocol->getValueAsContainer(&batteryData[i]).size());

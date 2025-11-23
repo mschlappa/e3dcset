@@ -398,6 +398,8 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_INFO);           // Info Container (kann DCB-Daten enthalten)
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);
@@ -781,6 +783,79 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         g_ctx.batContainerQuery = false;  // Reset flag after successful processing
         break;
        }
+
+    case TAG_BAT_INFO: {        // response for TAG_BAT_REQ_INFO - may contain DCB data
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+            printf("\n  === DCB Zellblöcke ===\n");
+        }
+        
+        std::vector<SRscpValue> infoData = protocol->getValueAsContainer(response);
+        
+        // Group DCB data by DCB_INDEX
+        std::map<uint8_t, std::vector<SRscpValue>> dcbData;
+        uint8_t currentDcbIndex = 0;
+        
+        for(size_t i = 0; i < infoData.size(); ++i) {
+            if (infoData[i].tag == TAG_BAT_DCB_INDEX) {
+                currentDcbIndex = protocol->getValueAsUChar8(&infoData[i]);
+            } else if ((infoData[i].tag & 0xFF800000) == 0x03800000) {
+                // This is a DCB-related tag (0x038xxxxx)
+                dcbData[currentDcbIndex].push_back(infoData[i]);
+            }
+        }
+        
+        // Print grouped DCB data
+        for (auto& dcbPair : dcbData) {
+            if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+                printf("  Zellblock %u:\n", dcbPair.first);
+            }
+            
+            for (auto& value : dcbPair.second) {
+                if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+                    const char* label = getTagDescription(value.tag);
+                    if (label) {
+                        printf("    %-28s ", label);
+                    } else {
+                        printf("    Tag 0x%08X:                ", value.tag);
+                    }
+                }
+                
+                // Print value based on type
+                switch(value.dataType) {
+                    case RSCP::eTypeFloat32: {
+                        float val = protocol->getValueAsFloat32(&value);
+                        printf("%.2f\n", val);
+                        break;
+                    }
+                    case RSCP::eTypeUChar8: {
+                        uint8_t val = protocol->getValueAsUChar8(&value);
+                        printf("%u\n", val);
+                        break;
+                    }
+                    case RSCP::eTypeUInt32: {
+                        uint32_t val = protocol->getValueAsUInt32(&value);
+                        printf("%u\n", val);
+                        break;
+                    }
+                    case RSCP::eTypeInt32: {
+                        int32_t val = protocol->getValueAsInt32(&value);
+                        printf("%d\n", val);
+                        break;
+                    }
+                    default:
+                        printf("(Typ %d)\n", value.dataType);
+                        break;
+                }
+            }
+        }
+        
+        // Clean up
+        for(size_t i = 0; i < infoData.size(); ++i) {
+            protocol->destroyValueData(&infoData[i]);
+        }
+        
+        break;
+    }
 
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;

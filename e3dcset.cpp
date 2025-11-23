@@ -726,8 +726,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 return -1;  // Stop processing after error
             }
             
-            // Skip BAT_INDEX and TAG_BAT_DCB_INFO in output (DCB_INFO is processed internally)
-            if (batteryData[i].tag == TAG_BAT_INDEX || batteryData[i].tag == TAG_BAT_DCB_INFO) {
+            // Skip BAT_INDEX in output (BAT_DCB_INFO is handled in container case)
+            if (batteryData[i].tag == TAG_BAT_INDEX) {
                 continue;
             }
             
@@ -760,7 +760,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             }
             
             // Print tag prefix - formatted for module dump, raw for single query
-            if (!g_ctx.quietMode) {
+            // Skip printing BAT_DCB_INFO tag itself (only print its contents)
+            if (!g_ctx.quietMode && batteryData[i].tag != TAG_BAT_DCB_INFO) {
                 if (g_ctx.modulInfoDump) {
                     // Friendly label for module info dump
                     const char* label = getTagDescription(batteryData[i].tag);

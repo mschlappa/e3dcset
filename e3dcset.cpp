@@ -850,12 +850,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {
-                                        printf("    %s\n", label);
+                                        printf("  %s\n", label);
                                     } else {
-                                        printf("    Tag 0x%08X:\n", tagValuePair.first);
+                                        printf("  Tag 0x%08X:\n", tagValuePair.first);
                                     }
                                     
-                                    // Formatiere Wert mit 2 Leerzeichen Einrückung
+                                    // Formatiere Wert mit 2 Leerzeichen Abstand
                                     switch(tagValuePair.second.dataType) {
                                         case RSCP::eTypeBool:
                                             printf("  %s\n", protocol->getValueAsBool(&tagValuePair.second) ? "true" : "false");

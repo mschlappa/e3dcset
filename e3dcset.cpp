@@ -698,6 +698,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         }
         
         bool foundRequestedTag = false;
+        bool receivedDCBData = false;  // Track if this response contained actual DCB data
         
         // Print header for module info dump
         if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
@@ -814,7 +815,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 }
                 case RSCP::eTypeContainer: {
                     // Handle nested containers - especially TAG_BAT_DCB_INFO
-                    if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump && !g_ctx.quietMode) {
+                    if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump) {
                         std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(&batteryData[i]);
                         
                         // DEBUG: Print all tags in the container to understand structure
@@ -823,7 +824,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             DEBUG("  [%zu] Tag 0x%08X, Typ %d\n", j, dcbInfoData[j].tag, dcbInfoData[j].dataType);
                         }
                         
-                        // Group DCB data by DCB_INDEX
+                        // Group DCB data by DCB_INDEX (ALWAYS parse, regardless of quiet mode)
                         std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
                         int8_t currentDcbIndex = -1;
                         
@@ -832,6 +833,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             
                             if (tag == TAG_BAT_DCB_INDEX) {
                                 currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[j]);
+                                receivedDCBData = true;  // CRITICAL: Set flag regardless of output mode!
                                 DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
                             } else if (currentDcbIndex >= 0) {
                                 // Check if this is a DCB-related tag
@@ -842,8 +844,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             }
                         }
                         
-                        // Print grouped DCB data
-                        if (dcbData.size() > 0) {
+                        // Print grouped DCB data (only if NOT in quiet mode)
+                        if (!g_ctx.quietMode && dcbData.size() > 0) {
                             printf("\n\n  === DCB Zellblöcke ===\n");
                             for (auto& dcbPair : dcbData) {
                                 printf("  Zellblock %u:\n", dcbPair.first);
@@ -882,20 +884,6 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         for(size_t j = 0; j < dcbInfoData.size(); ++j) {
                             protocol->destroyValueData(&dcbInfoData[j]);
                         }
-                        
-                        // After processing DCB response in BAT_DATA, check if we need more DCB requests
-                        if (g_ctx.needMoreDCBRequests) {
-                            g_ctx.currentDCBIndex++;
-                            DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
-                                  g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
-                            
-                            // Check if we've queried all DCBs
-                            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
-                                g_ctx.needMoreDCBRequests = false;
-                                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
-                                DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
-                            }
-                        }
                     } else if (!g_ctx.quietMode) {
                         printf("(Container mit %zu Elementen)\n", 
                                protocol->getValueAsContainer(&batteryData[i]).size());
@@ -918,6 +906,21 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         // In quiet mode (single tag query), if we didn't find the requested tag, output error
         if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
             fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
+        }
+        
+        // CRITICAL: Multi-DCB Loop Management
+        // Only increment if we actually received DCB data (not just battery-level response)
+        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump && receivedDCBData) {
+            g_ctx.currentDCBIndex++;
+            DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
+                  g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
+            
+            // Check if we've queried all DCBs
+            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                g_ctx.needMoreDCBRequests = false;
+                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
+            }
         }
         
         // Clean up vector elements properly

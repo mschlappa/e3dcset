@@ -850,9 +850,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {
-                                        printf("  %s\n", label);
+                                        printf("%s\n", label);
                                     } else {
-                                        printf("  Tag 0x%08X:\n", tagValuePair.first);
+                                        printf("Tag 0x%08X:\n", tagValuePair.first);
                                     }
                                     
                                     // Formatiere Wert mit 2 Leerzeichen Abstand

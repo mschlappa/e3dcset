@@ -215,6 +215,8 @@
 #define TAG_BAT_REQ_ASOC                                        0x0300000F
 #define TAG_BAT_REQ_MAX_DCB_CELL_TEMPERATURE                    0x03000016
 #define TAG_BAT_REQ_MIN_DCB_CELL_TEMPERATURE                    0x03000017
+#define TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES                   0x03000018
+#define TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES                       0x0300001A
 #define TAG_BAT_REQ_READY_FOR_SHUTDOWN                          0x0300001E
 #define TAG_BAT_REQ_INFO                                        0x03000020
 #define TAG_BAT_REQ_TRAINING_MODE                               0x03000021

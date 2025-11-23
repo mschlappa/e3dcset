@@ -399,7 +399,9 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO);       // DCB-Info (gibt ALLE DCBs zurück wenn mehrere)
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO);       // DCB-Info
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES); // ALLE DCB Temperaturen
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES);     // ALLE DCB Spannungen
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);

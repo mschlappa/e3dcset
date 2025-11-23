@@ -56,6 +56,7 @@ struct CommandContext {
     bool listTags;
     int listCategory;
     bool historieAbfrage;
+    bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
     
     // Power and energy settings
     uint32_t ladungsMenge;
@@ -357,7 +358,21 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
         if (g_ctx.werteAbfragen){
                 DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
-                protocol.appendValue(&rootValue, g_ctx.leseTag);
+                
+                // Check if this is a BAT_REQ_* tag (0x0300xxxx range) - needs BAT_REQ_DATA container
+                if ((g_ctx.leseTag & 0xFF000000) == 0x03000000 && (g_ctx.leseTag & 0x00FF0000) == 0x00000000) {
+                    DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
+                    SRscpValue batContainer;
+                    protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
+                    protocol.appendValue(&batContainer, TAG_BAT_INDEX, (uint16_t)0);
+                    protocol.appendValue(&batContainer, g_ctx.leseTag);
+                    protocol.appendValue(&rootValue, batContainer);
+                    protocol.destroyValueData(batContainer);
+                    g_ctx.batContainerQuery = true;
+                } else {
+                    protocol.appendValue(&rootValue, g_ctx.leseTag);
+                    g_ctx.batContainerQuery = false;
+                }
         }
         
         if (g_ctx.historieAbfrage){
@@ -577,51 +592,63 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
-        uint8_t ucBatteryIndex = 0;
         std::vector<SRscpValue> batteryData = protocol->getValueAsContainer(response);
         for(size_t i = 0; i < batteryData.size(); ++i) {
             if(batteryData[i].dataType == RSCP::eTypeError) {
-                // handle error for example access denied errors
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Tag 0x%08X received error code %u.\n", batteryData[i].tag, uiErrorCode);
-                return -1;
+                printf("Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
+                continue;
             }
-            // check each battery sub tag
-            switch(batteryData[i].tag) {
-            case TAG_BAT_INDEX: {
-                ucBatteryIndex = protocol->getValueAsUChar8(&batteryData[i]);
-                break;
+            
+            // Skip BAT_INDEX in output
+            if (batteryData[i].tag == TAG_BAT_INDEX) {
+                continue;
             }
-            case TAG_BAT_RSOC: {              // response for TAG_BAT_REQ_RSOC
-                float fSOC = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery SOC is %0.1f %%\n", fSOC);
-                break;
+            
+            // Generic output for all battery values
+            if (!g_ctx.quietMode) {
+                printf("Tag 0x%08X: ", batteryData[i].tag);
             }
-            case TAG_BAT_MODULE_VOLTAGE: {    // response for TAG_BAT_REQ_MODULE_VOLTAGE
-                float fVoltage = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery total voltage is %0.1f V\n", fVoltage);
-                break;
-            }
-            case TAG_BAT_CURRENT: {    // response for TAG_BAT_REQ_CURRENT
-                float fVoltage = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery current is %0.1f A\n", fVoltage);
-                break;
-            }
-            case TAG_BAT_STATUS_CODE: {    // response for TAG_BAT_REQ_STATUS_CODE
-                uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Battery status code is 0x%08X\n", uiErrorCode);
-                break;
-            }
-            case TAG_BAT_ERROR_CODE: {    // response for TAG_BAT_REQ_ERROR_CODE
-                uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Battery error code is 0x%08X\n", uiErrorCode);
-                break;
-            }
-            // ...
-            default:
-                // default behaviour
-                printf("Unknown battery tag %08X\n", response->tag);
-                break;
+            
+            switch(batteryData[i].dataType) {
+                case RSCP::eTypeFloat32: {
+                    float value = protocol->getValueAsFloat32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%.2f", value);
+                    printFormattedValue(batteryData[i].tag, buf, (int64_t)value);
+                    break;
+                }
+                case RSCP::eTypeUChar8: {
+                    uint8_t value = protocol->getValueAsUChar8(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    printFormattedValue(batteryData[i].tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeInt32: {
+                    int32_t value = protocol->getValueAsInt32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", value);
+                    printFormattedValue(batteryData[i].tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeUInt32: {
+                    uint32_t value = protocol->getValueAsUInt32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    printFormattedValue(batteryData[i].tag, buf, value);
+                    break;
+                }
+                case RSCP::eTypeString: {
+                    std::string str = protocol->getValueAsString(&batteryData[i]);
+                    printf("%s\n", str.c_str());
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Unbekannter Datentyp %d\n", batteryData[i].dataType);
+                    }
+                    break;
             }
         }
         protocol->destroyValueData(batteryData);

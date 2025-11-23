@@ -24,8 +24,8 @@ EMS_GET_SYS_SPECS = 0x01000098 # System-Spezifikationen
 
 [BAT]
 BAT_DATA = 0x03040000 # Batterie-Daten Container
-BAT_RSOC = 0x03000001 # Relativer Ladezustand (%) - Portal-Anzeige
-BAT_ASOC = 0x03800001 # Absoluter Ladezustand (%) - State of Health
+BAT_REQ_RSOC = 0x03000001 # Relativer Ladezustand (%) - Portal-Anzeige (REQUEST)
+BAT_RSOC = 0x03800001 # Relativer Ladezustand (%) - Portal-Anzeige (RESPONSE)
 BAT_MODULE_VOLTAGE = 0x03000002 # Modul-Spannung (V)
 BAT_CURRENT = 0x03000003 # Batterie-Strom (A)
 BAT_MAX_BAT_VOLTAGE = 0x03000004 # Maximale Batterie-Spannung (V)
@@ -37,8 +37,9 @@ BAT_STATUS_CODE = 0x0300000A # Status-Code
 BAT_ERROR_CODE = 0x0300000B # Fehler-Code
 BAT_DEVICE_NAME = 0x0300000C # Geräte-Name
 BAT_DEVICE_STATE = 0x03060000 # Geräte-Status
-BAT_DCB_SOC = 0x03800108 # DCB Module State of Charge (%)
-BAT_DCB_SOH = 0x03800109 # DCB Module State of Health (%)
+BAT_REQ_DCB_INFO = 0x03040005 # DCB Modul Informationen (REQUEST)
+BAT_DCB_SOC = 0x03800108 # DCB Module State of Charge (%) (RESPONSE)
+BAT_DCB_SOH = 0x03800109 # DCB Module State of Health (%) (RESPONSE)
 
 [PVI]
 PVI_DATA = 0x02040000 # PV-Wechselrichter Daten Container

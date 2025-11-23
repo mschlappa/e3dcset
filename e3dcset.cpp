@@ -384,12 +384,12 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         if (g_ctx.modulInfoDump){
                 DEBUG("Modul-Info-Dump für Modul %u angefordert\n", g_ctx.batIndex);
                 
-                // Create BAT_REQ_DATA container with multiple tags
+                // STEP 1: Create BAT_REQ_DATA container to get DCB_COUNT first
                 SRscpValue batContainer;
                 protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
                 protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
                 
-                // Add all common battery tags
+                // Add all battery-level tags (no DCB-specific tags yet)
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
@@ -398,10 +398,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO);       // DCB-Info
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES); // ALLE DCB Temperaturen
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES);     // ALLE DCB Spannungen
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs - CRITICAL!
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);

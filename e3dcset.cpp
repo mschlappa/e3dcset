@@ -398,24 +398,11 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
                 protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs (wird gespeichert)
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs
+                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO);       // DCB-Info (gibt ALLE DCBs zurück wenn mehrere)
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);
-                
-                // Request DCB info for each DCB (0 and 1)
-                // We make separate requests for each DCB to get all data
-                for (uint8_t dcbIdx = 0; dcbIdx < 2; dcbIdx++) {  // TODO: Use actual DCB_COUNT
-                    SRscpValue dcbContainer;
-                    protocol.createContainerValue(&dcbContainer, TAG_BAT_REQ_DATA);
-                    protocol.appendValue(&dcbContainer, TAG_BAT_INDEX, g_ctx.batIndex);
-                    protocol.appendValue(&dcbContainer, TAG_BAT_DCB_INDEX, dcbIdx);  // Set which DCB we want
-                    protocol.appendValue(&dcbContainer, TAG_BAT_REQ_DCB_INFO);       // Request DCB info
-                    protocol.appendValue(&rootValue, dcbContainer);
-                    protocol.destroyValueData(dcbContainer);
-                    DEBUG("DCB-Info für DCB %u angefordert\n", dcbIdx);
-                }
-                
                 g_ctx.batContainerQuery = true;
         }
         

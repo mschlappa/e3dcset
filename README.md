@@ -125,6 +125,26 @@ Batterie-Ladezustand (SOC) abfragen:
 
 **Hinweis:** Die `BAT_REQ_*` Tags nutzen automatisch den BAT_REQ_DATA Container - das Tool kümmert sich um die korrekte Anfrage-Struktur.
 
+**Multi-Batterie-Systeme:**
+
+Wenn Ihr E3DC System mehrere Batterie-Module hat, können Sie mit dem `-i` Parameter das gewünschte Modul auswählen:
+
+```bash
+# Standard: Erstes Modul (Index 0)
+./e3dcset -r BAT_REQ_RSOC              # Modul 0
+
+# Zweites Modul abfragen (Index 1)
+./e3dcset -r BAT_REQ_RSOC -i 1         # Modul 1
+
+# Drittes Modul (Index 2)
+./e3dcset -r BAT_REQ_ASOC -i 2         # Modul 2
+
+# Alle Module im Script abfragen
+for i in 0 1 2; do
+  echo "Modul $i SOH: $(./e3dcset -r BAT_REQ_ASOC -i $i -q)%"
+done
+```
+
 PV-Produktionsleistung abfragen:
 ```bash
 ./e3dcset -r EMS_POWER_PV
@@ -228,6 +248,7 @@ Leistungssteuerung:
 
 Daten-Abfragen:
   -r <tag>      RSCP-Tag-Wert abfragen (Name oder Hex wie 0x01000001)
+  -i <index>    Batterie-Modul Index für BAT_REQ_* Tags (Standard: 0)
   -q            Quiet-Mode - nur Wert ausgeben (für Skriptierung)
   -l [kat]      Tags nach Kategorie auflisten (1-8, kein Argument = Übersicht)
 

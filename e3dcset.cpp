@@ -64,6 +64,7 @@ struct CommandContext {
     uint32_t ladeLeistung;
     uint32_t entladeLeistung;
     uint32_t leseTag;
+    uint16_t batIndex;  // Batterie-Modul Index (0 = erstes Modul)
     
     // History query parameters
     char *historieDatum;        // Format: "YYYY-MM-DD" or "today"
@@ -93,6 +94,7 @@ struct CommandContext {
         ladeLeistung(0),
         entladeLeistung(0),
         leseTag(0),
+        batIndex(0),
         historieInterval(HISTORY_INTERVAL_DAY),
         historieSpan(HISTORY_SPAN_DAY),
         historieStartTime(0),
@@ -365,7 +367,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                     DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
                     SRscpValue batContainer;
                     protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
-                    protocol.appendValue(&batContainer, TAG_BAT_INDEX, (uint16_t)0);
+                    protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
                     protocol.appendValue(&batContainer, g_ctx.leseTag);
                     protocol.appendValue(&rootValue, batContainer);
                     protocol.destroyValueData(batContainer);
@@ -607,9 +609,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                if (!g_ctx.quietMode) {
-                    printf("Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
-                }
+                // Always output errors to stderr (quiet-mode contract)
+                fprintf(stderr, "Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
                 // Clean up vector elements
                 for(size_t j = 0; j < batteryData.size(); ++j) {
                     protocol->destroyValueData(&batteryData[j]);
@@ -1371,7 +1372,7 @@ void printTagList(int category) {
 
 void usage(void){
     fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -r TAG_NAME [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
     fprintf(stderr, "          e3dcset -l [kategorie]\n");
     fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
     fprintf(stderr, "   Optionen:\n");
@@ -1380,6 +1381,7 @@ void usage(void){
     fprintf(stderr, "     -e  Manuelle Ladungsmenge in Wh setzen (0 = stoppen)\n");
     fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
     fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
+    fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
     fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
     fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
@@ -1392,6 +1394,9 @@ void usage(void){
     fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
     fprintf(stderr, "     e3dcset -r EMS_POWER_PV         # PV-Leistung abfragen\n");
     fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
     fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
     fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
@@ -1583,7 +1588,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:r:qlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:ap:r:i:qlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
@@ -1640,6 +1645,9 @@ int main(int argc, char *argv[])
                     // Tag-Namen speichern für spätere Konvertierung (nach loadTagsFile)
                     g_ctx.tagName = strdup(optarg);
                 }
+                break;
+        case 'i':
+                g_ctx.batIndex = (uint16_t)atoi(optarg);
                 break;
         case 'q':
                 g_ctx.quietMode = true;

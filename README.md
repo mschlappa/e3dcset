@@ -107,6 +107,24 @@ Batterie-Ladezustand (SOC) abfragen:
 ./e3dcset -r EMS_BAT_SOC
 ```
 
+**Batterie-Gesundheitsüberwachung:**
+```bash
+# Relativer Ladezustand (Portal-Anzeige, 0-100%)
+./e3dcset -r BAT_REQ_RSOC
+
+# Absoluter SOC / State of Health (Batterie-Gesundheit, %)
+./e3dcset -r BAT_REQ_ASOC
+
+# Anzahl Ladezyklen
+./e3dcset -r BAT_REQ_CHARGE_CYCLES
+
+# Batterie-Strom und Spannung
+./e3dcset -r BAT_REQ_CURRENT
+./e3dcset -r BAT_REQ_MODULE_VOLTAGE
+```
+
+**Hinweis:** Die `BAT_REQ_*` Tags nutzen automatisch den BAT_REQ_DATA Container - das Tool kümmert sich um die korrekte Anfrage-Struktur.
+
 PV-Produktionsleistung abfragen:
 ```bash
 ./e3dcset -r EMS_POWER_PV
@@ -120,6 +138,8 @@ Mit direktem Hex-Wert abfragen:
 Mit Quiet-Mode abfragen (für Skripte):
 ```bash
 SOC=$(./e3dcset -r EMS_BAT_SOC -q)
+RSOC=$(./e3dcset -r BAT_REQ_RSOC -q)
+ASOC=$(./e3dcset -r BAT_REQ_ASOC -q)
 ```
 
 ### Verfügbare Tags durchsuchen

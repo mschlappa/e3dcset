@@ -850,9 +850,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {
-                                        printf("    %-32s", label);
+                                        printf("    %-27s", label);
                                     } else {
-                                        printf("    Tag 0x%08X:               ", tagValuePair.first);
+                                        printf("    Tag 0x%08X:          ", tagValuePair.first);
                                     }
                                     
                                     // Formatiere Werte rechtsbündig in 20 Zeichen breitem Feld

@@ -762,6 +762,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump && !g_ctx.quietMode) {
                         std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(&batteryData[i]);
                         
+                        // DEBUG: Print all tags in the container to understand structure
+                        DEBUG("=== DCB_INFO Container hat %zu Elemente ===\n", dcbInfoData.size());
+                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
+                            DEBUG("  [%zu] Tag 0x%08X, Typ %d\n", j, dcbInfoData[j].tag, dcbInfoData[j].dataType);
+                        }
+                        
                         // Group DCB data by DCB_INDEX
                         std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
                         int8_t currentDcbIndex = -1;

@@ -707,8 +707,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         bool foundRequestedTag = false;
         bool receivedDCBData = false;  // Track if this response contained actual DCB data
         
-        // Print header for module info dump
-        if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+        // Print header for module info dump (only on first call for this module)
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode && g_ctx.isFirstModuleDumpRequest) {
             printf("Batterie Modul %u:\n", g_ctx.batIndex);
         }
         

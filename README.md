@@ -145,6 +145,26 @@ for i in 0 1 2; do
 done
 ```
 
+**Alle Werte eines Moduls auf einmal anzeigen:**
+
+Mit der `-m` Option können Sie alle wichtigen Werte eines Batterie-Moduls in einer übersichtlichen Ausgabe erhalten:
+
+```bash
+# Alle Werte von Modul 0
+./e3dcset -m 0
+
+# Ausgabe:
+Batterie Modul 0:
+  Relativer SOC (Portal-Anzeige)   85.50 %
+  Absoluter SOC / State of Health  98.20 %
+  Anzahl Ladezyklen                234
+  Batterie-Strom                   -12.50 A
+  Modulspannung                    51.20 V
+  Max. Batteriespannung            58.80 V
+  Batterie-Statuscode              0
+  Fehler-Code                      0
+```
+
 PV-Produktionsleistung abfragen:
 ```bash
 ./e3dcset -r EMS_POWER_PV
@@ -249,6 +269,7 @@ Leistungssteuerung:
 Daten-Abfragen:
   -r <tag>      RSCP-Tag-Wert abfragen (Name oder Hex wie 0x01000001)
   -i <index>    Batterie-Modul Index für BAT_REQ_* Tags (Standard: 0)
+  -m <index>    Alle Werte eines Batterie-Moduls anzeigen
   -q            Quiet-Mode - nur Wert ausgeben (für Skriptierung)
   -l [kat]      Tags nach Kategorie auflisten (1-8, kein Argument = Übersicht)
 

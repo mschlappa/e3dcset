@@ -886,6 +886,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         // Print grouped DCB data (only if NOT in quiet mode)
                         if (!g_ctx.quietMode && dcbData.size() > 0) {
                             for (auto& dcbPair : dcbData) {
+                                printf("Zellblock #%u\n", dcbPair.first);
                                 for (auto& tagValuePair : dcbPair.second) {
                                     const char* label = getTagDescription(tagValuePair.first);
                                     if (label) {

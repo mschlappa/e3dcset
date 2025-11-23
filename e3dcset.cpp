@@ -844,18 +844,70 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                     }
                                     
                                     switch(tagValuePair.second.dataType) {
-                                        case RSCP::eTypeFloat32:
-                                            printf("%.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                        case RSCP::eTypeBool:
+                                            printf("%s\n", protocol->getValueAsBool(&tagValuePair.second) ? "true" : "false");
+                                            break;
+                                        case RSCP::eTypeChar8:
+                                            printf("%d\n", protocol->getValueAsChar8(&tagValuePair.second));
                                             break;
                                         case RSCP::eTypeUChar8:
                                             printf("%u\n", protocol->getValueAsUChar8(&tagValuePair.second));
                                             break;
-                                        case RSCP::eTypeUInt32:
-                                            printf("%u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                        case RSCP::eTypeInt16:
+                                            printf("%d\n", protocol->getValueAsInt16(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt16:
+                                            printf("%u\n", protocol->getValueAsUInt16(&tagValuePair.second));
                                             break;
                                         case RSCP::eTypeInt32:
                                             printf("%d\n", protocol->getValueAsInt32(&tagValuePair.second));
                                             break;
+                                        case RSCP::eTypeUInt32:
+                                            printf("%u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeInt64:
+                                            printf("%lld\n", (long long)protocol->getValueAsInt64(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt64:
+                                            printf("%llu\n", (unsigned long long)protocol->getValueAsUInt64(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeFloat32:
+                                            printf("%.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeDouble64:
+                                            printf("%.4f\n", protocol->getValueAsDouble64(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeString: {
+                                            std::string str = protocol->getValueAsString(&tagValuePair.second);
+                                            if (str.empty()) {
+                                                printf("(leer)\n");
+                                            } else {
+                                                printf("%s\n", str.c_str());
+                                            }
+                                            break;
+                                        }
+                                        case RSCP::eTypeBitfield: {
+                                            // Bitfield als Hex ausgeben
+                                            uint32_t bitfield = 0;
+                                            if (tagValuePair.second.length == 1) {
+                                                bitfield = protocol->getValueAsUChar8(&tagValuePair.second);
+                                            } else if (tagValuePair.second.length == 2) {
+                                                bitfield = protocol->getValueAsUInt16(&tagValuePair.second);
+                                            } else if (tagValuePair.second.length == 4) {
+                                                bitfield = protocol->getValueAsUInt32(&tagValuePair.second);
+                                            }
+                                            printf("0x%0*X\n", tagValuePair.second.length * 2, bitfield);
+                                            break;
+                                        }
+                                        case RSCP::eTypeByteArray: {
+                                            // ByteArray als Hex ausgeben
+                                            printf("0x");
+                                            for (uint16_t k = 0; k < tagValuePair.second.length; k++) {
+                                                printf("%02X", tagValuePair.second.data[k]);
+                                            }
+                                            printf("\n");
+                                            break;
+                                        }
                                         default:
                                             printf("(Typ %d)\n", tagValuePair.second.dataType);
                                             break;

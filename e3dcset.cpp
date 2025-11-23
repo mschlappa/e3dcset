@@ -1523,11 +1523,17 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 case RSCP::eTypeTimestamp: {
                     SRscpTimestamp ts = protocol->getValueAsTimestamp(response);
                     if (!g_ctx.quietMode) {
-                        time_t seconds = (time_t)ts.seconds;
-                        struct tm *timeinfo = localtime(&seconds);
-                        char timeStr[80];
-                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
-                        printf("%s.%03u\n", timeStr, ts.nanoseconds / 1000000);
+                        // Validate timestamp is in reasonable range (2000-2100)
+                        if (ts.seconds > 946684800ULL && ts.seconds < 4102444800ULL) {
+                            time_t seconds = (time_t)ts.seconds;
+                            struct tm timeinfo;
+                            localtime_r(&seconds, &timeinfo);
+                            char timeStr[80];
+                            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+                            printf("%s.%03u\n", timeStr, ts.nanoseconds / 1000000);
+                        } else {
+                            printf("%lld.%09u (ungültiger Timestamp)\n", (long long)ts.seconds, ts.nanoseconds);
+                        }
                     } else {
                         printf("%llu.%09u\n", (unsigned long long)ts.seconds, ts.nanoseconds);
                     }

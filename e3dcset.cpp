@@ -765,9 +765,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     // Friendly label for module info dump
                     const char* label = getTagDescription(batteryData[i].tag);
                     if (label) {
-                        printf("  %-30s ", label);
+                        printf("%s\n", label);
                     } else {
-                        printf("  Tag 0x%08X:                  ", batteryData[i].tag);
+                        printf("Tag 0x%08X:\n", batteryData[i].tag);
                     }
                 } else {
                     printf("Tag 0x%08X: ", batteryData[i].tag);
@@ -785,6 +785,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     const char* interp = interpretValue(batteryData[i].tag, roundedValue);
                     if (g_ctx.quietMode) {
                         printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump && interp) {
+                        printf("  %s (%s)\n", buf, interp);
+                    } else if (g_ctx.modulInfoDump) {
+                        printf("  %s\n", buf);
                     } else if (interp) {
                         printf("%s (%s)\n", buf, interp);
                     } else {
@@ -796,26 +800,63 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     uint8_t value = protocol->getValueAsUChar8(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(batteryData[i].tag, buf, value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt32: {
                     int32_t value = protocol->getValueAsInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(batteryData[i].tag, buf, value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUInt32: {
                     uint32_t value = protocol->getValueAsUInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(batteryData[i].tag, buf, value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeString: {
                     std::string str = protocol->getValueAsString(&batteryData[i]);
-                    printf("%s\n", str.c_str());
+                    if (g_ctx.modulInfoDump) {
+                        printf("  %s\n", str.c_str());
+                    } else {
+                        printf("%s\n", str.c_str());
+                    }
                     break;
                 }
                 case RSCP::eTypeContainer: {

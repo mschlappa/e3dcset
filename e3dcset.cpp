@@ -593,11 +593,26 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
         std::vector<SRscpValue> batteryData = protocol->getValueAsContainer(response);
+        
+        // Calculate expected response tag from request tag (REQUEST 0x03xxxx -> RESPONSE 0x38xxxx)
+        uint32_t expectedResponseTag = 0;
+        if (g_ctx.batContainerQuery) {
+            expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
+        }
+        
         for(size_t i = 0; i < batteryData.size(); ++i) {
+            // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
-                continue;
+                if (!g_ctx.quietMode) {
+                    printf("Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
+                }
+                // Clean up vector elements
+                for(size_t j = 0; j < batteryData.size(); ++j) {
+                    protocol->destroyValueData(&batteryData[j]);
+                }
+                g_ctx.batContainerQuery = false;  // Reset flag
+                return -1;  // Stop processing after error
             }
             
             // Skip BAT_INDEX in output
@@ -605,17 +620,31 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 continue;
             }
             
-            // Generic output for all battery values
+            // In quiet mode, only output the requested tag's value
+            if (g_ctx.quietMode && batteryData[i].tag != expectedResponseTag) {
+                continue;
+            }
+            
+            // Print tag prefix only in non-quiet mode
             if (!g_ctx.quietMode) {
                 printf("Tag 0x%08X: ", batteryData[i].tag);
             }
             
+            // Process battery value based on datatype - uses printFormattedValue for interpretations
             switch(batteryData[i].dataType) {
                 case RSCP::eTypeFloat32: {
                     float value = protocol->getValueAsFloat32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%.2f", value);
-                    printFormattedValue(batteryData[i].tag, buf, (int64_t)value);
+                    // Use float value directly for interpretations (don't truncate to int64_t)
+                    const char* interp = interpretValue(batteryData[i].tag, (int64_t)value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (interp) {
+                        printf("%s (%s)\n", buf, interp);
+                    } else {
+                        printf("%s\n", buf);
+                    }
                     break;
                 }
                 case RSCP::eTypeUChar8: {
@@ -650,8 +679,19 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     }
                     break;
             }
+            
+            // In quiet mode, stop after printing the requested value
+            if (g_ctx.quietMode) {
+                break;
+            }
         }
-        protocol->destroyValueData(batteryData);
+        
+        // Clean up vector elements properly
+        for(size_t i = 0; i < batteryData.size(); ++i) {
+            protocol->destroyValueData(&batteryData[i]);
+        }
+        
+        g_ctx.batContainerQuery = false;  // Reset flag after successful processing
         break;
        }
 

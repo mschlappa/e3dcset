@@ -60,6 +60,12 @@ struct CommandContext {
     bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
     bool modulInfoDump;      // True wenn alle Modul-Werte abgefragt werden (-m)
     
+    // Multi-DCB support
+    bool needMoreDCBRequests;  // True wenn weitere DCB-Requests nötig sind
+    uint8_t currentDCBIndex;   // Aktueller DCB-Index für Multi-Request
+    uint8_t totalDCBs;         // Gesamtanzahl DCBs (aus DCB_COUNT)
+    bool isFirstModuleDumpRequest;  // True für ersten Request (Battery-Level-Daten)
+    
     // Power and energy settings
     uint32_t ladungsMenge;
     uint32_t ladeLeistung;
@@ -93,6 +99,10 @@ struct CommandContext {
         historieAbfrage(false),
         batContainerQuery(false),
         modulInfoDump(false),
+        needMoreDCBRequests(false),
+        currentDCBIndex(0),
+        totalDCBs(0),
+        isFirstModuleDumpRequest(true),
         ladungsMenge(0),
         ladeLeistung(0),
         entladeLeistung(0),
@@ -169,6 +179,25 @@ struct TagInfo {
 
 std::map<int, std::vector<TagInfo>> loadedTags;  // category -> tags
 std::map<std::string, std::string> loadedInterpretations;  // "hex:value" -> interpretation
+
+// DCB-Daten-Struktur für Multi-Request-Sammlung
+struct DCBData {
+    uint8_t index;
+    std::vector<std::pair<uint32_t, SRscpValue>> tags;  // tag -> value pairs
+};
+
+// Batterie-Modul-Daten-Struktur
+struct BatteryModuleData {
+    std::map<uint32_t, SRscpValue> batteryTags;  // Battery-level tags (SOC, SOH, etc.)
+    std::vector<DCBData> dcbs;  // Per-DCB data
+    uint8_t dcbCount;
+};
+
+static BatteryModuleData g_batteryData;  // Global accumulator for module dump
+
+// Forward declarations for helper functions
+int sendRequestAndReceive(RscpProtocol* protocol, SRscpValue& rootValue);
+int buildDCBRequest(RscpProtocol* protocol, SRscpFrameBuffer* frameBuffer, uint16_t batIndex, uint8_t dcbIndex);
 
 // Tag-Datei laden
 void loadTagsFile(const char* filename) {
@@ -382,23 +411,30 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         }
         
         if (g_ctx.modulInfoDump){
-                DEBUG("Modul-Info-Dump für Modul %u angefordert\n", g_ctx.batIndex);
-                
-                // STEP 1: Create BAT_REQ_DATA container to get DCB_COUNT first
                 SRscpValue batContainer;
                 protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
                 protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
                 
-                // Add all battery-level tags (no DCB-specific tags yet)
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_CURRENT);        // Strom
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_MODULE_VOLTAGE); // Modulspannung
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
-                protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs - CRITICAL!
+                if (g_ctx.isFirstModuleDumpRequest) {
+                    // FIRST REQUEST: Get battery-level data + DCB_COUNT
+                    DEBUG("Modul-Info-Dump für Modul %u - ERSTE Anfrage (Battery-Level + DCB_COUNT)\n", g_ctx.batIndex);
+                    
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_CURRENT);        // Strom
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_MODULE_VOLTAGE); // Modulspannung
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs - CRITICAL!
+                } else {
+                    // SUBSEQUENT REQUESTS: Get specific DCB data
+                    DEBUG("Modul-Info-Dump für Modul %u - DCB #%u Anfrage\n", g_ctx.batIndex, g_ctx.currentDCBIndex);
+                    
+                    // Request DCB info with index as VALUE (like rscp2mqtt does)
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO, (uint8_t)g_ctx.currentDCBIndex);
+                }
                 
                 protocol.appendValue(&rootValue, batContainer);
                 protocol.destroyValueData(batContainer);
@@ -685,6 +721,26 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             // Skip BAT_INDEX in output
             if (batteryData[i].tag == TAG_BAT_INDEX) {
                 continue;
+            }
+            
+            // Special handling for DCB_COUNT in module dump mode
+            if (batteryData[i].tag == TAG_BAT_DCB_COUNT && g_ctx.modulInfoDump) {
+                uint8_t dcbCount = protocol->getValueAsUChar8(&batteryData[i]);
+                g_ctx.totalDCBs = dcbCount;
+                DEBUG("DCB_COUNT empfangen: %u DCBs vorhanden\n", dcbCount);
+                
+                // If we have DCBs and this is the first request, set up the multi-request loop
+                if (dcbCount > 0 && g_ctx.isFirstModuleDumpRequest) {
+                    g_ctx.needMoreDCBRequests = true;
+                    g_ctx.currentDCBIndex = 0;
+                    g_ctx.isFirstModuleDumpRequest = false;
+                    DEBUG("Weitere DCB-Requests erforderlich: %u DCBs\n", dcbCount);
+                } else if (dcbCount == 0) {
+                    // No DCBs - reset state
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;
+                }
+                // Continue to print DCB_COUNT in output
             }
             
             // In quiet mode (single tag query), only process the requested tag's value
@@ -1000,6 +1056,20 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             // Clean up
             for(size_t i = 0; i < dcbInfoData.size(); ++i) {
                 protocol->destroyValueData(&dcbInfoData[i]);
+            }
+            
+            // After processing DCB response, check if we need more DCB requests
+            if (g_ctx.needMoreDCBRequests) {
+                g_ctx.currentDCBIndex++;
+                DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
+                      g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
+                
+                // Check if we've queried all DCBs
+                if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                    DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
+                }
             }
             
             break;
@@ -1546,14 +1616,29 @@ static void mainLoop(void)
             else {
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
-                if (counter > 0) bStopExecution = true; // #MS# end program after first receive
+                
+                // After first receive, check if we need more DCB requests
+                if (counter > 0) {
+                    if (g_ctx.needMoreDCBRequests) {
+                        // Continue loop for next DCB request
+                        DEBUG("Multi-DCB-Request läuft weiter: Index %u von %u\n", 
+                              g_ctx.currentDCBIndex, g_ctx.totalDCBs);
+                        // Loop continues automatically
+                    } else {
+                        // No more requests needed - stop
+                        bStopExecution = true;
+                        DEBUG("Keine weiteren Requests erforderlich - beende mainLoop\n");
+                    }
+                }
             }
         }
         // free frame buffer memory
         protocol.destroyFrameData(&frameBuffer);
 
-        // main loop sleep / cycle time before next request
-        sleep(1);
+        // main loop sleep / cycle time before next request (only if continuing)
+        if (!bStopExecution) {
+            sleep(1);
+        }
 
         counter++;
 

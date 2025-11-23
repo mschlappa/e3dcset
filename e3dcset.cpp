@@ -501,14 +501,32 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
 // Get tag description from loaded tags (search all categories)
 const char* getTagDescription(uint32_t tag) {
-    // Search through all categories
+    // For RESPONSE tags (0x??8?????), try to find the REQUEST tag description first
+    uint32_t requestTag = tag;
+    if ((tag & 0x00800000) != 0) {
+        requestTag = tag & ~0x00800000;  // Clear response bit
+    }
+    
+    // Search through all categories for REQUEST tag first
     for (auto& categoryPair : loadedTags) {
         for (auto& tagInfo : categoryPair.second) {
-            if (tagInfo.hex == tag) {
+            if (tagInfo.hex == requestTag) {
                 return tagInfo.description.c_str();
             }
         }
     }
+    
+    // If not found and this was a RESPONSE tag, try original tag
+    if (requestTag != tag) {
+        for (auto& categoryPair : loadedTags) {
+            for (auto& tagInfo : categoryPair.second) {
+                if (tagInfo.hex == tag) {
+                    return tagInfo.description.c_str();
+                }
+            }
+        }
+    }
+    
     return NULL;
 }
 

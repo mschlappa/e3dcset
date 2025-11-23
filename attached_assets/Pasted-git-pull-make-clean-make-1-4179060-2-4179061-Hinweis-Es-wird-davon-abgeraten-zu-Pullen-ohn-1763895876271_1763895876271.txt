@@ -1,0 +1,46 @@
+git pull & make clean & make
+[1] 4179060
+[2] 4179061
+Hinweis: Es wird davon abgeraten zu Pullen, ohne anzugeben, wie mit abweichenden
+Hinweis: Branches umgegangen werden soll. Sie können diese Nachricht unterdrücken,
+Hinweis: indem Sie einen der folgenden Befehle ausführen, bevor der nächste Pull
+Hinweis: ausgeführt wird:
+Hinweis: 
+Hinweis:   git config pull.rebase false  # Merge (Standard-Strategie)
+Hinweis:   git config pull.rebase true   # Rebase
+Hinweis:   git config pull.ff only       # ausschließlich Vorspulen
+rm e3dcset 
+Hinweis: 
+Hinweis: Sie können statt "git config" auch "git config --global" nutzen, um
+Hinweis: einen Standard für alle Repositories festzulegen. Sie können auch die
+Hinweis: Option --rebase, --no-rebase oder --ff-only auf der Kommandozeile nutzen,
+Hinweis: um das konfigurierte Standardverhalten pro Aufruf zu überschreiben.
+rm e3dcset 
+rm: das Entfernen von 'e3dcset' ist nicht möglich: Datei oder Verzeichnis nicht gefunden
+make: [Makefile:11: clean] Fehler 1 (ignoriert)
+g++ -O3 e3dcset.cpp RscpProtocol.cpp AES.cpp SocketConnection.cpp -o e3dcset
+Bereits aktuell.
+[1]-  Fertig                  git pull
+[2]+  Fertig                  make clean
+marcus@hmland:~/e3dcset $ cat e3dcset.cpp | grep g_ctx.modulInfoDump
+        if (g_ctx.modulInfoDump){
+        if (g_ctx.batContainerQuery && !g_ctx.modulInfoDump) {
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode) {
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && batteryData[i].tag != expectedResponseTag) {
+                if (g_ctx.modulInfoDump) {
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && foundRequestedTag) {
+        if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump){
+                g_ctx.modulInfoDump = true;
+marcus@hmland:~/e3dcset $ ./e3dcset -m 0
+Batterie Modul 0:
+  Relativer Ladezustand (%) - RESPONSE 86.71
+  Absoluter SOC / State of Health - RESPONSE 48.90
+  Anzahl Ladezyklen - RESPONSE   1774
+  Batterie-Strom - RESPONSE      28.00
+  Modul-Spannung - RESPONSE      55.81
+  Tag 0x03800004:                  57.40
+  Status-Code - RESPONSE         154
+  Fehler-Code - RESPONSE         0 (OK (kein Fehler))
+marcus@hmland:~/e3dcset $ ./e3dcset -m 1
+Tag 0x03840000 received error code 6.

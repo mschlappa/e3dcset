@@ -5,37 +5,65 @@ Alle bedeutenden Änderungen an diesem Projekt werden in dieser Datei dokumentie
 ## [Unreleased] - 2025-01-23
 
 ### Hinzugefügt
-- **RSCP Tags für Multiple-DCB-Abfrage**: TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES (0x03000018) und TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES (0x0300001A) in RscpTags.h hinzugefügt
-- Diese Tags werden im Modul-Info-Dump (-m 0) zusätzlich angefordert
+- **Multi-DCB Unterstützung**: Vollständige Anzeige ALLER DCB-Module (Zellblöcke) eines E3DC S10 Systems
+- **Multi-Request-Architektur**: Implementiert sequenzielle Abfragen basierend auf rscp2mqtt C++ Implementierung
+  1. Erste Anfrage: Batterie-Daten + TAG_BAT_REQ_DCB_COUNT → ermittelt Anzahl DCBs
+  2. Folge-Anfragen: TAG_BAT_REQ_DCB_INFO mit DCB-Index als Wert → liefert Daten für jeden DCB
+- **CommandContext-Erweiterung**: DCB-Tracking mit `totalDCBs`, `currentDCBIndex`, `needMoreDCBRequests`, `isFirstModuleDumpRequest`
+- **Automatische Loop-Verwaltung**: mainLoop läuft automatisch weiter bis alle DCBs abgefragt wurden
+- **RSCP Tags für DCB-Abfrage**: TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES (0x03000018) und TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES (0x0300001A) in RscpTags.h hinzugefügt
 
 ### Geändert  
-- Request für Modul-Info-Dump erweitert um TAG_BAT_REQ_DCB_ALL_CELL_TEMPERATURES und TAG_BAT_REQ_DCB_ALL_CELL_VOLTAGES
-- Basierend auf rscpgui Analyse: Diese Tags könnten ALLE DCB-Module zurückgeben
+- **Request-Building-Logik** in createRequestExample():
+  - Erster Request: Battery-Level-Tags + TAG_BAT_REQ_DCB_COUNT
+  - Weitere Requests: Nur TAG_BAT_REQ_DCB_INFO mit Index-Wert (korrekte RSCP-Syntax)
+- **Response-Verarbeitung** in handleResponseValue():
+  - TAG_BAT_DATA: Extrahiert DCB_COUNT und initialisiert Multi-Request-Loop
+  - TAG_BAT_DCB_INFO: Zeigt DCB-Daten an, inkrementiert Index, beendet Loop nach letztem DCB
+- **mainLoop**: Prüft `needMoreDCBRequests` und läuft weiter oder stoppt entsprechend
 
-### Erkenntnisse aus python-e3dc Library Analyse
-Die zugrundeliegende Python-Library (fsantini/python-e3dc), die von RSCPGui verwendet wird, macht **mehrere separate Requests**:
-1. Erst TAG_BAT_REQ_DCB_COUNT abfragen → erhält Anzahl DCBs
-2. Dann für JEDEN DCB-Index (0, 1, 2...) einen separaten Request mit:
-   - BAT_REQ_DATA Container
-   - BAT_INDEX = 0
-   - DCB_INDEX = (aktueller DCB)
-   - BAT_REQ_DCB_INFO
+### Behoben
+- **Kritischer Bug**: TAG_BAT_DCB_INDEX (0x03800100) ist ein RESPONSE-Tag und darf NICHT im Request verwendet werden
+  - **Korrekte Lösung**: TAG_BAT_REQ_DCB_INFO nimmt den DCB-Index als Wert: `appendValue(&container, TAG_BAT_REQ_DCB_INFO, (uint8_t)dcbIndex)`
+- **Loop-Terminierung**: Inkrementierung und Terminierungsprüfung erfolgen jetzt konsistent in TAG_BAT_DCB_INFO Response-Handler
+- **State-Reset**: `isFirstModuleDumpRequest` wird auf `true` zurückgesetzt nach vollständigem DCB-Durchlauf → wiederholte Ausführungen funktionieren
+- **Memory-Management**: DCB-Daten werden sofort ausgegeben (keine Akkumulation), SRscpValue-Container korrekt mit destroyValueData freigegeben
 
-**Beispiel aus python-e3dc:**
-```python
-if "dcbs" in battery:
-    dcbs = list(range(0, battery["dcbs"]))  # [0, 1] für 2 DCBs
-for dcbIndex in dcbs:
-    # Separater Request für jeden DCB
-    get_battery_data(batIndex=0, dcbs=[dcbIndex])
+### Technische Details
+Die Implementierung basiert auf Analyse von:
+- **rscp2mqtt** (pvtom/rscp2mqtt): C++ Referenzimplementierung für Multi-DCB-Requests
+- **python-e3dc** (fsantini/python-e3dc): Python-Library mit DCB-Iteration
+
+**Korrekte RSCP-Syntax für DCB-Abfragen:**
+```cpp
+// FALSCH (Error 7):
+protocol.appendValue(&container, TAG_BAT_DCB_INDEX, dcbIndex);
+protocol.appendValue(&container, TAG_BAT_REQ_DCB_INFO);
+
+// RICHTIG:
+protocol.appendValue(&container, TAG_BAT_REQ_DCB_INFO, (uint8_t)dcbIndex);
 ```
 
-### Nächste Schritte
-1. **Test der aktuellen Implementierung**: Die neuen Tags (DCB_ALL_CELL_*) könnten trotzdem funktionieren
-2. **Falls nicht**: Code umschreiben um mehrere Requests zu machen (wie python-e3dc)
-   - Erst DCB_COUNT abfragen
-   - Dann Schleife über jeden DCB-Index
-   - Für jeden DCB separaten Request senden
+**Beispiel-Ausgabe (System mit 2 DCBs):**
+```
+Batterie Modul 0:
+  Relativer Ladezustand (RSOC):    85.00 %
+  ...
+  Anzahl DCB-Module:               2
+
+  === DCB Zellblöcke ===
+  Zellblock 0:
+    State of Health (SOH):         48.90 %
+    Ladezyklen:                    1774
+    Strom:                         -2.50 A
+    ...
+
+  Zellblock 1:
+    State of Health (SOH):         84.90 %
+    Ladezyklen:                    1557
+    Strom:                         -2.48 A
+    ...
+```
 
 ## [Previous] - 2025-01-22
 

@@ -145,25 +145,56 @@ for i in 0 1 2; do
 done
 ```
 
-**Alle Werte eines Moduls auf einmal anzeigen:**
+**Alle Werte eines Moduls auf einmal anzeigen (inkl. ALLE DCB-Zellblöcke):**
 
-Mit der `-m` Option können Sie alle wichtigen Werte eines Batterie-Moduls in einer übersichtlichen Ausgabe erhalten:
+Mit der `-m` Option können Sie alle wichtigen Werte eines Batterie-Moduls **inklusive aller DCB-Module** in einer übersichtlichen Ausgabe erhalten:
 
 ```bash
-# Alle Werte von Modul 0
+# Alle Werte von Modul 0 (inkl. alle DCBs)
 ./e3dcset -m 0
 
-# Ausgabe:
+# Ausgabe (Beispiel mit 2 DCB-Modulen):
 Batterie Modul 0:
-  Relativer SOC (Portal-Anzeige)   85.50 %
-  Absoluter SOC / State of Health  98.20 %
-  Anzahl Ladezyklen                234
-  Batterie-Strom                   -12.50 A
-  Modulspannung                    51.20 V
-  Max. Batteriespannung            58.80 V
-  Batterie-Statuscode              0
-  Fehler-Code                      0
+  Relativer SOC (Portal-Anzeige):  85.50 %
+  Absoluter SOC / State of Health: 98.20 %
+  Anzahl Ladezyklen:               234
+  Batterie-Strom:                  -12.50 A
+  Modulspannung:                   51.20 V
+  Max. Batteriespannung:           58.80 V
+  Batterie-Statuscode:             0
+  Fehler-Code:                     0
+  Anzahl DCB-Module:               2
+
+  === DCB Zellblöcke ===
+  Zellblock 0:
+    State of Health (SOH):         48.90 %
+    Ladezyklen:                    1774
+    Strom:                         -2.50 A
+    Spannung:                      51.20 V
+    Volle Ladekapazität:           96.50 Ah
+    Verbleibende Kapazität:        47.20 Ah
+    ...
+
+  Zellblock 1:
+    State of Health (SOH):         84.90 %
+    Ladezyklen:                    1557
+    Strom:                         -2.48 A
+    Spannung:                      51.18 V
+    Volle Ladekapazität:           96.80 Ah
+    Verbleibende Kapazität:        82.20 Ah
+    ...
 ```
+
+**NEU:** Das Tool fragt automatisch **alle DCB-Module** ab und zeigt deren detaillierte Informationen an:
+- State of Health (SOH) pro DCB
+- Ladezyklen pro DCB
+- Strom/Spannung pro DCB
+- Kapazitätsdaten pro DCB
+
+Dies ermöglicht die **Überwachung der Gesundheit einzelner Batterie-Zellblöcke**, insbesondere nützlich bei:
+- Systemen mit unterschiedlich alten DCB-Modulen
+- Erkennung von degradierten Zellblöcken
+- Präzise Batterie-Zustandsüberwachung
 
 PV-Produktionsleistung abfragen:
 ```bash

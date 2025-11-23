@@ -1762,9 +1762,9 @@ void readConfig(void){
         DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
         DEBUG("server_ip=%s\n",e3dc_config.server_ip);
         DEBUG("server_port=%i\n",e3dc_config.server_port);
-        DEBUG("e3dc_user=%s\n",e3dc_config.e3dc_user);
-        DEBUG("e3dc_password=%s\n",e3dc_config.e3dc_password);
-        DEBUG("aes_password=%s\n",e3dc_config.aes_password);
+        DEBUG("e3dc_user=%s\n", strlen(e3dc_config.e3dc_user) > 0 ? "***@***" : "");
+        DEBUG("e3dc_password=%s\n", strlen(e3dc_config.e3dc_password) > 0 ? "********" : "");
+        DEBUG("aes_password=%s\n", strlen(e3dc_config.aes_password) > 0 ? "********" : "");
         DEBUG("----------------------------------------------------------\n");
 
         fclose(fp);

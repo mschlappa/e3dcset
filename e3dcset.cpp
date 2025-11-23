@@ -765,16 +765,23 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         std::vector<SRscpValue> infoData = protocol->getValueAsContainer(&batteryData[i]);
                         
                         // Group DCB data by DCB_INDEX
+                        // Using a map to keep DCBs sorted by index
                         std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
-                        uint8_t currentDcbIndex = 0;
+                        int8_t currentDcbIndex = -1;  // Start with -1 to detect first DCB_INDEX
                         
                         for(size_t j = 0; j < infoData.size(); ++j) {
-                            if (infoData[j].tag == TAG_BAT_DCB_INDEX) {
+                            uint32_t tag = infoData[j].tag;
+                            
+                            if (tag == TAG_BAT_DCB_INDEX) {
                                 currentDcbIndex = protocol->getValueAsUChar8(&infoData[j]);
-                            } else {
-                                // Store tag and value (copy tag to avoid packed field issue)
-                                uint32_t tag = infoData[j].tag;
-                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, infoData[j]));
+                                DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
+                            } else if (currentDcbIndex >= 0) {
+                                // Only store data if we have seen a DCB_INDEX
+                                // Check if this is a DCB-related tag (0x038xxxxx range)
+                                if ((tag & 0xFFF00000) == 0x03800000) {
+                                    dcbData[currentDcbIndex].push_back(std::make_pair(tag, infoData[j]));
+                                    DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
+                                }
                             }
                         }
                         

@@ -479,6 +479,13 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         }
 
         if (g_ctx.manuelleSpeicherladung){
+                DEBUG("Sende TAG_EMS_REQ_START_MANUAL_CHARGE (0x%08X) mit Ladungsmenge: %u Wh\n", 
+                      TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
+                if (g_ctx.ladungsMenge == 0) {
+                    DEBUG("  -> Anforderung: Manuelles Laden STOPPEN\n");
+                } else {
+                    DEBUG("  -> Anforderung: Manuelles Laden STARTEN mit %u Wh\n", g_ctx.ladungsMenge);
+                }
                 protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
         }
 
@@ -636,17 +643,28 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
-
-        if (protocol->getValueAsBool(response)){
-
+        DEBUG("Empfange TAG_EMS_START_MANUAL_CHARGE (0x%08X) Response\n", response->tag);
+        DEBUG("  Response DataType: %d\n", response->dataType);
+        
+        bool result = protocol->getValueAsBool(response);
+        DEBUG("  Response Wert (Bool): %s\n", result ? "true (akzeptiert)" : "false (abgelehnt)");
+        
+        if (result){
                 if (g_ctx.ladungsMenge == 0){
                         printf("Manuelles Laden gestoppt\n");
+                        DEBUG("  -> Erfolgreich: Ladevorgang wurde gestoppt\n");
                 }else{
                         printf("Manuelles Laden gestartet\n");
+                        DEBUG("  -> Erfolgreich: Ladevorgang mit %u Wh gestartet\n", g_ctx.ladungsMenge);
                 }
-
         }else{
-          printf("Manuelles Laden abgeleht.\n");
+                printf("Manuelles Laden abgelehnt.\n");
+                DEBUG("  -> ABGELEHNT: E3DC hat den Ladebefehl nicht akzeptiert!\n");
+                DEBUG("     Mögliche Gründe:\n");
+                DEBUG("     - Batterie bereits voll (SOC 100%%)\n");
+                DEBUG("     - Anderer Ladevorgang aktiv\n");
+                DEBUG("     - Netzstrom nicht verfügbar\n");
+                DEBUG("     - Systemfehler am E3DC\n");
         }
         break;
     } 

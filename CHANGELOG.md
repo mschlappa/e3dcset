@@ -5,6 +5,11 @@ Alle bedeutenden Änderungen an diesem Projekt werden in dieser Datei dokumentie
 ## [Unreleased] - 2025-01-23
 
 ### Hinzugefügt
+- **Parameter -E (Notstromreserve setzen)**: Neuer Parameter zum Setzen der Notstromreserve in Wh
+  - `./e3dcset -E 2600` - Setzt Reserve auf 2600 Wh
+  - `./e3dcset -E 0` - Deaktiviert die Reserve
+  - **Workaround für Netzladung**: Da -e (manuelles Laden) nur bedingt funktioniert, kann über die Notstromreserve eine Netzladung erzwungen werden
+  - Neue RSCP-Tags: TAG_EP_REQ_SET_EP_RESERVE, TAG_EP_PARAM_INDEX, TAG_EP_PARAM_EP_RESERVE_ENERGY
 - **Multi-DCB Unterstützung**: Vollständige Anzeige ALLER DCB-Module (Zellblöcke) eines E3DC S10 Systems
 - **Multi-Request-Architektur**: Implementiert sequenzielle Abfragen basierend auf rscp2mqtt C++ Implementierung
   1. Erste Anfrage: Batterie-Daten + TAG_BAT_REQ_DCB_COUNT → ermittelt Anzahl DCBs

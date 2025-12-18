@@ -245,3 +245,14 @@ DB_AUTARKY = 0x0680000D # Response: Autarkiegrad (%)
 0x0500000A:0 = OK (kein Fehler)
 0x0E000005:0 = OK (kein Fehler)
 0x04000010:0 = OK (kein Fehler)
+
+# Emergency Power (EP) Tags - Kategorie 10 (Notstrom)
+# Namespace 0x1B
+EP_REQ_EP_RESERVE:0x1B000009:Notstromreserve abfragen
+EP_REQ_SET_EP_RESERVE:0x1B000010:Notstromreserve setzen
+EP_EP_RESERVE:0x1B800009:Notstromreserve Response
+EP_SET_EP_RESERVE:0x1B800010:Notstromreserve gesetzt Response
+EP_PARAM_INDEX:0x1B040000:Parameter-Index
+EP_PARAM_EP_RESERVE:0x1B040023:Reserve in Prozent (0-50%)
+EP_PARAM_EP_RESERVE_ENERGY:0x1B040033:Reserve in Wh
+EP_PARAM_EP_RESERVE_MAX_ENERGY:0x1B040034:Max Reserve in Wh

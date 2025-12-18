@@ -59,6 +59,7 @@ struct CommandContext {
     bool historieAbfrage;
     bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
     bool modulInfoDump;      // True wenn alle Modul-Werte abgefragt werden (-m)
+    bool setEPReserve;       // True wenn Notstromreserve gesetzt werden soll (-E)
     
     // Multi-DCB support
     bool needMoreDCBRequests;  // True wenn weitere DCB-Requests nötig sind
@@ -72,6 +73,7 @@ struct CommandContext {
     uint32_t entladeLeistung;
     uint32_t leseTag;
     uint16_t batIndex;  // Batterie-Modul Index (0 = erstes Modul)
+    float epReserveWh;  // Notstromreserve in Wh (-E)
     
     // History query parameters
     char *historieDatum;        // Format: "YYYY-MM-DD" or "today"
@@ -99,6 +101,7 @@ struct CommandContext {
         historieAbfrage(false),
         batContainerQuery(false),
         modulInfoDump(false),
+        setEPReserve(false),
         needMoreDCBRequests(false),
         currentDCBIndex(0),
         totalDCBs(0),
@@ -108,6 +111,7 @@ struct CommandContext {
         entladeLeistung(0),
         leseTag(0),
         batIndex(0),
+        epReserveWh(0.0f),
         historieInterval(HISTORY_INTERVAL_DAY),
         historieSpan(HISTORY_SPAN_DAY),
         historieStartTime(0),
@@ -528,6 +532,27 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
         }
 
+        if (g_ctx.setEPReserve){
+                DEBUG("Sende TAG_EP_REQ_SET_EP_RESERVE (0x%08X) mit Reserve: %.0f Wh\n", 
+                      TAG_EP_REQ_SET_EP_RESERVE, g_ctx.epReserveWh);
+                
+                // Create EP_REQ_SET_EP_RESERVE container
+                SRscpValue epContainer;
+                protocol.createContainerValue(&epContainer, TAG_EP_REQ_SET_EP_RESERVE);
+                
+                // Add parameter index (always 0 for main parameter)
+                protocol.appendValue(&epContainer, TAG_EP_PARAM_INDEX, (uint8_t)0);
+                
+                // Add reserve energy value in Wh
+                protocol.appendValue(&epContainer, TAG_EP_PARAM_EP_RESERVE_ENERGY, g_ctx.epReserveWh);
+                
+                // Append container to root
+                protocol.appendValue(&rootValue, epContainer);
+                protocol.destroyValueData(epContainer);
+                
+                printf("Setze Notstromreserve auf %.0f Wh\n", g_ctx.epReserveWh);
+        }
+
     }
 
     // create buffer frame to send data to the S10
@@ -667,7 +692,30 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 DEBUG("     - Systemfehler am E3DC\n");
         }
         break;
-    } 
+    }
+    case TAG_EP_SET_EP_RESERVE: {
+        DEBUG("Empfange TAG_EP_SET_EP_RESERVE (0x%08X) Response\n", response->tag);
+        
+        // Response is a container with the set values
+        std::vector<SRscpValue> epData = protocol->getValueAsContainer(response);
+        float reserveWh = 0.0f;
+        float reservePercent = 0.0f;
+        
+        for(size_t i = 0; i < epData.size(); i++){
+            switch(epData[i].tag){
+                case TAG_EP_PARAM_EP_RESERVE_ENERGY:
+                    reserveWh = protocol->getValueAsFloat32(&epData[i]);
+                    break;
+                case TAG_EP_PARAM_EP_RESERVE:
+                    reservePercent = protocol->getValueAsFloat32(&epData[i]);
+                    break;
+            }
+            protocol->destroyValueData(epData[i]);
+        }
+        
+        printf("Notstromreserve gesetzt: %.0f Wh (%.1f%%)\n", reserveWh, reservePercent);
+        break;
+    }
     case TAG_EMS_POWER_PV: {    // response for TAG_EMS_REQ_POWER_PV
         int32_t iPower = protocol->getValueAsInt32(response);
         if (g_ctx.quietMode) {
@@ -1881,7 +1929,7 @@ void printTagList(int category) {
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-E Reserve] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
     fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
     fprintf(stderr, "          e3dcset -m <Modul-Index> [-p Pfad zur Konfigurationsdatei]\n");
     fprintf(stderr, "          e3dcset -l [kategorie]\n");
@@ -1890,6 +1938,7 @@ void usage(void){
     fprintf(stderr, "     -c  LadeLeistung in Watt setzen\n");
     fprintf(stderr, "     -d  EntladeLeistung in Watt setzen\n");
     fprintf(stderr, "     -e  Manuelle Ladungsmenge in Wh setzen (0 = stoppen)\n");
+    fprintf(stderr, "     -E  Notstromreserve in Wh setzen (Workaround fuer Netzladung)\n");
     fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
     fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
     fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
@@ -1900,7 +1949,7 @@ void usage(void){
     fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
     fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
     fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
-    fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e oder -a kombiniert werden\n\n");
+    fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e, -E oder -a kombiniert werden\n\n");
     fprintf(stderr, "   Beispiele:\n");
     fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
     fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
@@ -1914,6 +1963,8 @@ void usage(void){
     fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
     fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
+    fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
+    fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
     fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n\n");
     exit(EXIT_FAILURE);
 }
@@ -1993,13 +2044,18 @@ void readConfig(void){
 
 void checkArguments(void){
 
-    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung)){
-        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
+    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
+        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
         exit(EXIT_FAILURE);
     }
     
-    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen)){
-        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
+    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen || g_ctx.setEPReserve)){
+        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.setEPReserve && g_ctx.epReserveWh < 0){
+        fprintf(stderr, "[-E] Notstromreserve muss >= 0 Wh sein\n\n");
         exit(EXIT_FAILURE);
     }
 
@@ -2047,7 +2103,7 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
 
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump){
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }
@@ -2102,7 +2158,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
@@ -2119,6 +2175,10 @@ int main(int argc, char *argv[])
         case 'e':
                 g_ctx.manuelleSpeicherladung = true;
                 g_ctx.ladungsMenge = atoi(optarg);
+                break;
+        case 'E':
+                g_ctx.setEPReserve = true;
+                g_ctx.epReserveWh = (float)atof(optarg);
                 break;
         case 'a':
                 g_ctx.leistungAendern = true;

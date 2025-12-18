@@ -711,4 +711,14 @@
 #define TAG_WB_REQ_PARAM_1                                      0x0E04101B
 #define TAG_WB_RSP_PARAM_1                                      0x0E84101B
 
+// Emergency Power (EP) Reserve Tags - Namespace 0x1B
+#define TAG_EP_REQ_EP_RESERVE                                   0x1B000009
+#define TAG_EP_REQ_SET_EP_RESERVE                               0x1B000010
+#define TAG_EP_EP_RESERVE                                       0x1B800009
+#define TAG_EP_SET_EP_RESERVE                                   0x1B800010
+#define TAG_EP_PARAM_INDEX                                      0x1B040000
+#define TAG_EP_PARAM_EP_RESERVE                                 0x1B040023
+#define TAG_EP_PARAM_EP_RESERVE_ENERGY                          0x1B040033
+#define TAG_EP_PARAM_EP_RESERVE_MAX_ENERGY                      0x1B040034
+
 #endif

@@ -693,8 +693,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         }
         break;
     }
+    case TAG_EP_EP_RESERVE:
     case TAG_EP_SET_EP_RESERVE: {
-        DEBUG("Empfange TAG_EP_SET_EP_RESERVE (0x%08X) Response\n", response->tag);
+        DEBUG("Empfange EP Reserve Response (0x%08X)\n", response->tag);
         
         // Response is a container with the set values
         std::vector<SRscpValue> epData = protocol->getValueAsContainer(response);

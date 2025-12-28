@@ -1,0 +1,61 @@
+/e3dcset -m 0 2>&1 | grep -E "Tag 0x03" | head -60
+  [0] Tag 0x03800100, Typ 6
+  [1] Tag 0x03800101, Typ 9
+  [2] Tag 0x03800102, Typ 10
+  [3] Tag 0x03800103, Typ 10
+  [4] Tag 0x03800104, Typ 10
+  [5] Tag 0x03800105, Typ 10
+  [6] Tag 0x03800106, Typ 10
+  [7] Tag 0x03800107, Typ 10
+  [8] Tag 0x03800108, Typ 10
+  [9] Tag 0x03800109, Typ 10
+  [10] Tag 0x03800110, Typ 7
+  [11] Tag 0x03800111, Typ 10
+  [12] Tag 0x03800112, Typ 10
+  [13] Tag 0x03800113, Typ 10
+  [14] Tag 0x03800114, Typ 10
+  [15] Tag 0x03800305, Typ 3
+  [16] Tag 0x03800115, Typ 10
+  [17] Tag 0x03800116, Typ 10
+  [18] Tag 0x03800117, Typ 10
+  [19] Tag 0x03800118, Typ 10
+  [20] Tag 0x03800119, Typ 7
+  [21] Tag 0x03800120, Typ 7
+  [22] Tag 0x03800121, Typ 7
+  [23] Tag 0x03800122, Typ 7
+  [24] Tag 0x03800123, Typ 7
+  [25] Tag 0x03800124, Typ 7
+  [26] Tag 0x03800300, Typ 7
+  [27] Tag 0x03800301, Typ 7
+  [28] Tag 0x03800302, Typ 13
+  [29] Tag 0x03800303, Typ 13
+  [30] Tag 0x03800304, Typ 13
+  [31] Tag 0x03800306, Typ 5
+  [32] Tag 0x03800307, Typ 5
+  [33] Tag 0x03800308, Typ 5
+  [34] Tag 0x03800309, Typ 5
+  Tag 0x03800101 zugeordnet zu DCB 0
+  Tag 0x03800102 zugeordnet zu DCB 0
+  Tag 0x03800103 zugeordnet zu DCB 0
+  Tag 0x03800104 zugeordnet zu DCB 0
+  Tag 0x03800105 zugeordnet zu DCB 0
+  Tag 0x03800106 zugeordnet zu DCB 0
+  Tag 0x03800107 zugeordnet zu DCB 0
+  Tag 0x03800108 zugeordnet zu DCB 0
+  Tag 0x03800109 zugeordnet zu DCB 0
+  Tag 0x03800110 zugeordnet zu DCB 0
+  Tag 0x03800111 zugeordnet zu DCB 0
+  Tag 0x03800112 zugeordnet zu DCB 0
+  Tag 0x03800113 zugeordnet zu DCB 0
+  Tag 0x03800114 zugeordnet zu DCB 0
+  Tag 0x03800305 zugeordnet zu DCB 0
+  Tag 0x03800115 zugeordnet zu DCB 0
+  Tag 0x03800116 zugeordnet zu DCB 0
+  Tag 0x03800117 zugeordnet zu DCB 0
+  Tag 0x03800118 zugeordnet zu DCB 0
+  Tag 0x03800119 zugeordnet zu DCB 0
+  Tag 0x03800120 zugeordnet zu DCB 0
+  Tag 0x03800121 zugeordnet zu DCB 0
+  Tag 0x03800122 zugeordnet zu DCB 0
+  Tag 0x03800123 zugeordnet zu DCB 0
+  Tag 0x03800124 zugeordnet zu DCB 0

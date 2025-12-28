@@ -107,6 +107,95 @@ Batterie-Ladezustand (SOC) abfragen:
 ./e3dcset -r EMS_BAT_SOC
 ```
 
+**Batterie-Gesundheitsüberwachung:**
+```bash
+# Relativer Ladezustand (Portal-Anzeige, 0-100%)
+./e3dcset -r BAT_REQ_RSOC
+
+# Absoluter SOC / State of Health (Batterie-Gesundheit, %)
+./e3dcset -r BAT_REQ_ASOC
+
+# Anzahl Ladezyklen
+./e3dcset -r BAT_REQ_CHARGE_CYCLES
+
+# Batterie-Strom und Spannung
+./e3dcset -r BAT_REQ_CURRENT
+./e3dcset -r BAT_REQ_MODULE_VOLTAGE
+```
+
+**Hinweis:** Die `BAT_REQ_*` Tags nutzen automatisch den BAT_REQ_DATA Container - das Tool kümmert sich um die korrekte Anfrage-Struktur.
+
+**Multi-Batterie-Systeme:**
+
+Wenn Ihr E3DC System mehrere Batterie-Module hat, können Sie mit dem `-i` Parameter das gewünschte Modul auswählen:
+
+```bash
+# Standard: Erstes Modul (Index 0)
+./e3dcset -r BAT_REQ_RSOC              # Modul 0
+
+# Zweites Modul abfragen (Index 1)
+./e3dcset -r BAT_REQ_RSOC -i 1         # Modul 1
+
+# Drittes Modul (Index 2)
+./e3dcset -r BAT_REQ_ASOC -i 2         # Modul 2
+
+# Alle Module im Script abfragen
+for i in 0 1 2; do
+  echo "Modul $i SOH: $(./e3dcset -r BAT_REQ_ASOC -i $i -q)%"
+done
+```
+
+**Alle Werte eines Moduls auf einmal anzeigen (inkl. ALLE DCB-Zellblöcke):**
+
+Mit der `-m` Option können Sie alle wichtigen Werte eines Batterie-Moduls **inklusive aller DCB-Module** in einer übersichtlichen Ausgabe erhalten:
+
+```bash
+# Alle Werte von Modul 0 (inkl. alle DCBs)
+./e3dcset -m 0
+
+# Ausgabe (Beispiel mit 2 DCB-Modulen):
+Batterie Modul 0:
+  Relativer SOC (Portal-Anzeige):  85.50 %
+  Absoluter SOC / State of Health: 98.20 %
+  Anzahl Ladezyklen:               234
+  Batterie-Strom:                  -12.50 A
+  Modulspannung:                   51.20 V
+  Max. Batteriespannung:           58.80 V
+  Batterie-Statuscode:             0
+  Fehler-Code:                     0
+  Anzahl DCB-Module:               2
+
+  === DCB Zellblöcke ===
+  Zellblock 0:
+    State of Health (SOH):         48.90 %
+    Ladezyklen:                    1774
+    Strom:                         -2.50 A
+    Spannung:                      51.20 V
+    Volle Ladekapazität:           96.50 Ah
+    Verbleibende Kapazität:        47.20 Ah
+    ...
+
+  Zellblock 1:
+    State of Health (SOH):         84.90 %
+    Ladezyklen:                    1557
+    Strom:                         -2.48 A
+    Spannung:                      51.18 V
+    Volle Ladekapazität:           96.80 Ah
+    Verbleibende Kapazität:        82.20 Ah
+    ...
+```
+
+**NEU:** Das Tool fragt automatisch **alle DCB-Module** ab und zeigt deren detaillierte Informationen an:
+- State of Health (SOH) pro DCB
+- Ladezyklen pro DCB
+- Strom/Spannung pro DCB
+- Kapazitätsdaten pro DCB
+
+Dies ermöglicht die **Überwachung der Gesundheit einzelner Batterie-Zellblöcke**, insbesondere nützlich bei:
+- Systemen mit unterschiedlich alten DCB-Modulen
+- Erkennung von degradierten Zellblöcken
+- Präzise Batterie-Zustandsüberwachung
+
 PV-Produktionsleistung abfragen:
 ```bash
 ./e3dcset -r EMS_POWER_PV
@@ -120,6 +209,8 @@ Mit direktem Hex-Wert abfragen:
 Mit Quiet-Mode abfragen (für Skripte):
 ```bash
 SOC=$(./e3dcset -r EMS_BAT_SOC -q)
+RSOC=$(./e3dcset -r BAT_REQ_RSOC -q)
+ASOC=$(./e3dcset -r BAT_REQ_ASOC -q)
 ```
 
 ### Verfügbare Tags durchsuchen
@@ -208,6 +299,8 @@ Leistungssteuerung:
 
 Daten-Abfragen:
   -r <tag>      RSCP-Tag-Wert abfragen (Name oder Hex wie 0x01000001)
+  -i <index>    Batterie-Modul Index für BAT_REQ_* Tags (Standard: 0)
+  -m <index>    Alle Werte eines Batterie-Moduls anzeigen
   -q            Quiet-Mode - nur Wert ausgeben (für Skriptierung)
   -l [kat]      Tags nach Kategorie auflisten (1-8, kein Argument = Übersicht)
 

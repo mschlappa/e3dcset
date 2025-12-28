@@ -2,7 +2,7 @@
 
 Alle bedeutenden Änderungen an diesem Projekt werden in dieser Datei dokumentiert.
 
-## [Unreleased] - 2025-01-23
+## [Unreleased] - 2025-12-28
 
 ### Hinzugefügt
 - **Parameter -E (Notstromreserve setzen)**: Neuer Parameter zum Setzen der Notstromreserve in Wh
@@ -70,7 +70,7 @@ Batterie Modul 0:
     ...
 ```
 
-## [Previous] - 2025-01-22
+## [Previous] 
 
 ### Hinzugefügt
 - DCB-spezifische Abfragen mit TAG_BAT_REQ_DCB_INFO (0x03000042)

@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <strings.h>
 #include <time.h>
+#include <cmath>
 #include <map>
 #include <string>
 #include <vector>
@@ -24,7 +25,7 @@
 #define HISTORY_INTERVAL_WEEK     3600    // 1 hour
 #define HISTORY_SPAN_WEEK         604800  // 7 days
 #define HISTORY_INTERVAL_MONTH    86400   // 1 day
-#define HISTORY_SPAN_MONTH        2592000 // 30 days
+#define HISTORY_SPAN_MONTH        2678400 // 31 days
 #define HISTORY_INTERVAL_YEAR     604800  // 1 week
 #define HISTORY_SPAN_YEAR         31536000// 365 days
 
@@ -56,12 +57,23 @@ struct CommandContext {
     bool listTags;
     int listCategory;
     bool historieAbfrage;
+    bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
+    bool modulInfoDump;      // True wenn alle Modul-Werte abgefragt werden (-m)
+    bool setEPReserve;       // True wenn Notstromreserve gesetzt werden soll (-E)
+    
+    // Multi-DCB support
+    bool needMoreDCBRequests;  // True wenn weitere DCB-Requests nötig sind
+    uint8_t currentDCBIndex;   // Aktueller DCB-Index für Multi-Request
+    uint8_t totalDCBs;         // Gesamtanzahl DCBs (aus DCB_COUNT)
+    bool isFirstModuleDumpRequest;  // True für ersten Request (Battery-Level-Daten)
     
     // Power and energy settings
     uint32_t ladungsMenge;
     uint32_t ladeLeistung;
     uint32_t entladeLeistung;
     uint32_t leseTag;
+    uint16_t batIndex;  // Batterie-Modul Index (0 = erstes Modul)
+    float epReserveWh;  // Notstromreserve in Wh (-E)
     
     // History query parameters
     char *historieDatum;        // Format: "YYYY-MM-DD" or "today"
@@ -87,10 +99,19 @@ struct CommandContext {
         listTags(false),
         listCategory(0),
         historieAbfrage(false),
+        batContainerQuery(false),
+        modulInfoDump(false),
+        setEPReserve(false),
+        needMoreDCBRequests(false),
+        currentDCBIndex(0),
+        totalDCBs(0),
+        isFirstModuleDumpRequest(true),
         ladungsMenge(0),
         ladeLeistung(0),
         entladeLeistung(0),
         leseTag(0),
+        batIndex(0),
+        epReserveWh(0.0f),
         historieInterval(HISTORY_INTERVAL_DAY),
         historieSpan(HISTORY_SPAN_DAY),
         historieStartTime(0),
@@ -162,6 +183,25 @@ struct TagInfo {
 
 std::map<int, std::vector<TagInfo>> loadedTags;  // category -> tags
 std::map<std::string, std::string> loadedInterpretations;  // "hex:value" -> interpretation
+
+// DCB-Daten-Struktur für Multi-Request-Sammlung
+struct DCBData {
+    uint8_t index;
+    std::vector<std::pair<uint32_t, SRscpValue>> tags;  // tag -> value pairs
+};
+
+// Batterie-Modul-Daten-Struktur
+struct BatteryModuleData {
+    std::map<uint32_t, SRscpValue> batteryTags;  // Battery-level tags (SOC, SOH, etc.)
+    std::vector<DCBData> dcbs;  // Per-DCB data
+    uint8_t dcbCount;
+};
+
+static BatteryModuleData g_batteryData;  // Global accumulator for module dump
+
+// Forward declarations for helper functions
+int sendRequestAndReceive(RscpProtocol* protocol, SRscpValue& rootValue);
+int buildDCBRequest(RscpProtocol* protocol, SRscpFrameBuffer* frameBuffer, uint16_t batIndex, uint8_t dcbIndex);
 
 // Tag-Datei laden
 void loadTagsFile(const char* filename) {
@@ -246,18 +286,41 @@ void loadTagsFile(const char* filename) {
     DEBUG("Tag-Datei '%s' erfolgreich geladen\n", filename);
 }
 
+// Berechnet Tage im Monat (unter Berücksichtigung von Schaltjahren)
+int getDaysInMonth(int month, int year) {
+    // month: 1-12, year: 4-stellige Jahreszahl
+    int daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    
+    if (month < 1 || month > 12) return 31;
+    
+    int days = daysInMonth[month - 1];
+    
+    // Schaltjahr-Check für Februar
+    if (month == 2) {
+        // Schaltjahr: Jahr teilbar durch 4, aber nicht durch 100 (außer teilbar durch 400)
+        if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+            days = 29;
+        }
+    }
+    
+    return days;
+}
+
 // Konvertiert Datum zu Unix-Timestamp mit History-Typ-Anpassung (Anfang der Periode)
 time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
     struct tm tm_date = {0};
     time_t now;
+    int year = 0, month = 0;  // Speichern für Monats-Berechnung
     
     if (strcmp(dateStr, "today") == 0) {
         time(&now);
         struct tm* tm_now = localtime(&now);
         tm_date = *tm_now;
+        year = tm_now->tm_year + 1900;
+        month = tm_now->tm_mon + 1;
     } else {
         // Parse YYYY-MM-DD Format
-        int year, month, day;
+        int day;
         if (sscanf(dateStr, "%d-%d-%d", &year, &month, &day) != 3) {
             fprintf(stderr, "Fehler: Ungültiges Datumsformat '%s'\n", dateStr);
             fprintf(stderr, "Verwenden Sie 'today' oder 'YYYY-MM-DD' (z.B. 2024-11-20)\n");
@@ -288,6 +351,10 @@ time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
     } else if (strcmp(historyType, "month") == 0) {
         // Gehe zum 1. des Monats
         tm_date.tm_mday = 1;
+        // Speichere die Tage des Monats global für später (wird in createRequestExample verwendet)
+        int daysInMonth = getDaysInMonth(month, year);
+        g_ctx.historieSpan = daysInMonth * 86400;  // Tage * Sekunden pro Tag
+        DEBUG("Monat %d/%d hat %d Tage, SPAN = %u Sekunden\n", month, year, daysInMonth, g_ctx.historieSpan);
     } else if (strcmp(historyType, "year") == 0) {
         // Gehe zum 1. Januar
         tm_date.tm_mon = 0;
@@ -330,7 +397,47 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
         if (g_ctx.werteAbfragen){
                 DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
-                protocol.appendValue(&rootValue, g_ctx.leseTag);
+                
+                // Check if this is a BAT_REQ_* tag (0x0300xxxx range) - needs BAT_REQ_DATA container
+                if ((g_ctx.leseTag & 0xFF000000) == 0x03000000 && (g_ctx.leseTag & 0x00FF0000) == 0x00000000) {
+                    DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
+                    SRscpValue batContainer;
+                    protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
+                    protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
+                    protocol.appendValue(&batContainer, g_ctx.leseTag);
+                    protocol.appendValue(&rootValue, batContainer);
+                    protocol.destroyValueData(batContainer);
+                    g_ctx.batContainerQuery = true;
+                } else {
+                    protocol.appendValue(&rootValue, g_ctx.leseTag);
+                    g_ctx.batContainerQuery = false;
+                }
+        }
+        
+        if (g_ctx.modulInfoDump){
+                SRscpValue batContainer;
+                protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
+                protocol.appendValue(&batContainer, TAG_BAT_INDEX, g_ctx.batIndex);
+                
+                if (g_ctx.isFirstModuleDumpRequest) {
+                    // FIRST REQUEST: Get battery-level data + DCB_COUNT
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_RSOC);           // Relativer SOC
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_ASOC);           // Absoluter SOC / SOH
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_CHARGE_CYCLES);  // Ladezyklen
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_CURRENT);        // Strom
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_MODULE_VOLTAGE); // Modulspannung
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_MAX_BAT_VOLTAGE);// Max. Spannung
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_STATUS_CODE);    // Statuscode
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_ERROR_CODE);     // Fehlercode
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_COUNT);      // Anzahl DCBs - CRITICAL!
+                } else {
+                    // SUBSEQUENT REQUESTS: Get specific DCB data
+                    protocol.appendValue(&batContainer, TAG_BAT_REQ_DCB_INFO, (uint8_t)g_ctx.currentDCBIndex);
+                }
+                
+                protocol.appendValue(&rootValue, batContainer);
+                protocol.destroyValueData(batContainer);
+                g_ctx.batContainerQuery = true;
         }
         
         if (g_ctx.historieAbfrage){
@@ -350,7 +457,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 } else if (strcmp(g_ctx.historieTyp, "month") == 0) {
                     historyTag = TAG_DB_REQ_HISTORY_DATA_MONTH;
                     g_ctx.historieInterval = HISTORY_INTERVAL_MONTH;
-                    g_ctx.historieSpan = HISTORY_SPAN_MONTH;
+                    // historieSpan wird dynamisch in dateToTimestamp() berechnet!
                 } else if (strcmp(g_ctx.historieTyp, "year") == 0) {
                     historyTag = TAG_DB_REQ_HISTORY_DATA_YEAR;
                     g_ctx.historieInterval = HISTORY_INTERVAL_YEAR;
@@ -376,6 +483,13 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         }
 
         if (g_ctx.manuelleSpeicherladung){
+                DEBUG("Sende TAG_EMS_REQ_START_MANUAL_CHARGE (0x%08X) mit Ladungsmenge: %u Wh\n", 
+                      TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
+                if (g_ctx.ladungsMenge == 0) {
+                    DEBUG("  -> Anforderung: Manuelles Laden STOPPEN\n");
+                } else {
+                    DEBUG("  -> Anforderung: Manuelles Laden STARTEN mit %u Wh\n", g_ctx.ladungsMenge);
+                }
                 protocol.appendValue(&rootValue, TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
         }
 
@@ -418,6 +532,27 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 
         }
 
+        if (g_ctx.setEPReserve){
+                DEBUG("Sende TAG_EP_REQ_SET_EP_RESERVE (0x%08X) mit Reserve: %.0f Wh\n", 
+                      TAG_EP_REQ_SET_EP_RESERVE, g_ctx.epReserveWh);
+                
+                // Create EP_REQ_SET_EP_RESERVE container
+                SRscpValue epContainer;
+                protocol.createContainerValue(&epContainer, TAG_EP_REQ_SET_EP_RESERVE);
+                
+                // Add parameter index (always 0 for main parameter)
+                protocol.appendValue(&epContainer, TAG_EP_PARAM_INDEX, (uint8_t)0);
+                
+                // Add reserve energy value in Wh
+                protocol.appendValue(&epContainer, TAG_EP_PARAM_EP_RESERVE_ENERGY, g_ctx.epReserveWh);
+                
+                // Append container to root
+                protocol.appendValue(&rootValue, epContainer);
+                protocol.destroyValueData(epContainer);
+                
+                printf("Setze Notstromreserve auf %.0f Wh\n", g_ctx.epReserveWh);
+        }
+
     }
 
     // create buffer frame to send data to the S10
@@ -426,6 +561,49 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     protocol.destroyValueData(rootValue);
 
     return 0;
+}
+
+// Get tag description from loaded tags (search all categories)
+const char* getTagDescription(uint32_t tag) {
+    // For RESPONSE tags (0x??8?????), try to find the REQUEST tag description first
+    uint32_t requestTag = tag;
+    if ((tag & 0x00800000) != 0) {
+        requestTag = tag & ~0x00800000;  // Clear response bit
+    }
+    
+    // Search through all categories for REQUEST tag first
+    for (auto& categoryPair : loadedTags) {
+        for (auto& tagInfo : categoryPair.second) {
+            if (tagInfo.hex == requestTag) {
+                return tagInfo.description.c_str();
+            }
+        }
+    }
+    
+    // If not found and this was a RESPONSE tag, try original tag
+    if (requestTag != tag) {
+        for (auto& categoryPair : loadedTags) {
+            for (auto& tagInfo : categoryPair.second) {
+                if (tagInfo.hex == tag) {
+                    return tagInfo.description.c_str();
+                }
+            }
+        }
+    }
+    
+    return NULL;
+}
+
+// Format millisecond Unix epoch timestamp to human-readable string
+std::string formatTimestamp(uint64_t milliseconds) {
+    time_t seconds = milliseconds / 1000;
+    struct tm timeinfo;
+    localtime_r(&seconds, &timeinfo);
+    
+    char buffer[64];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    
+    return std::string(buffer);
 }
 
 const char* interpretValue(uint32_t tag, int64_t value) {
@@ -490,20 +668,55 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_EMS_START_MANUAL_CHARGE: {
-
-        if (protocol->getValueAsBool(response)){
-
+        DEBUG("Empfange TAG_EMS_START_MANUAL_CHARGE (0x%08X) Response\n", response->tag);
+        DEBUG("  Response DataType: %d\n", response->dataType);
+        
+        bool result = protocol->getValueAsBool(response);
+        DEBUG("  Response Wert (Bool): %s\n", result ? "true (akzeptiert)" : "false (abgelehnt)");
+        
+        if (result){
                 if (g_ctx.ladungsMenge == 0){
                         printf("Manuelles Laden gestoppt\n");
+                        DEBUG("  -> Erfolgreich: Ladevorgang wurde gestoppt\n");
                 }else{
                         printf("Manuelles Laden gestartet\n");
+                        DEBUG("  -> Erfolgreich: Ladevorgang mit %u Wh gestartet\n", g_ctx.ladungsMenge);
                 }
-
         }else{
-          printf("Manuelles Laden abgeleht.\n");
+                printf("Manuelles Laden abgelehnt.\n");
+                DEBUG("  -> ABGELEHNT: E3DC hat den Ladebefehl nicht akzeptiert!\n");
+                DEBUG("     Mögliche Gründe:\n");
+                DEBUG("     - Batterie bereits voll (SOC 100%%)\n");
+                DEBUG("     - Anderer Ladevorgang aktiv\n");
+                DEBUG("     - Netzstrom nicht verfügbar\n");
+                DEBUG("     - Systemfehler am E3DC\n");
         }
         break;
-    } 
+    }
+    case TAG_EP_EP_RESERVE:
+    case TAG_EP_SET_EP_RESERVE: {
+        DEBUG("Empfange EP Reserve Response (0x%08X)\n", response->tag);
+        
+        // Response is a container with the set values
+        std::vector<SRscpValue> epData = protocol->getValueAsContainer(response);
+        float reserveWh = 0.0f;
+        float reservePercent = 0.0f;
+        
+        for(size_t i = 0; i < epData.size(); i++){
+            switch(epData[i].tag){
+                case TAG_EP_PARAM_EP_RESERVE_ENERGY:
+                    reserveWh = protocol->getValueAsFloat32(&epData[i]);
+                    break;
+                case TAG_EP_PARAM_EP_RESERVE:
+                    reservePercent = protocol->getValueAsFloat32(&epData[i]);
+                    break;
+            }
+            protocol->destroyValueData(epData[i]);
+        }
+        
+        printf("Notstromreserve gesetzt: %.0f Wh (%.1f%%)\n", reserveWh, reservePercent);
+        break;
+    }
     case TAG_EMS_POWER_PV: {    // response for TAG_EMS_REQ_POWER_PV
         int32_t iPower = protocol->getValueAsInt32(response);
         if (g_ctx.quietMode) {
@@ -550,56 +763,496 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     case TAG_BAT_DATA: {        // response for TAG_BAT_REQ_DATA
-        uint8_t ucBatteryIndex = 0;
         std::vector<SRscpValue> batteryData = protocol->getValueAsContainer(response);
+        
+        // Calculate expected response tag from request tag (REQUEST 0x03xxxx -> RESPONSE 0x38xxxx)
+        uint32_t expectedResponseTag = 0;
+        if (g_ctx.batContainerQuery && !g_ctx.modulInfoDump) {
+            expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
+        }
+        
+        bool foundRequestedTag = false;
+        bool receivedDCBData = false;  // Track if this response contained actual DCB data
+        
+        // Print header for module info dump (only on first call for this module)
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode && g_ctx.isFirstModuleDumpRequest) {
+            printf("Batterie Modul %u:\n", g_ctx.batIndex);
+        }
+        
         for(size_t i = 0; i < batteryData.size(); ++i) {
+            // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
-                // handle error for example access denied errors
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Tag 0x%08X received error code %u.\n", batteryData[i].tag, uiErrorCode);
-                return -1;
+                // Always output errors to stderr (quiet-mode contract)
+                fprintf(stderr, "Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
+                // Clean up vector elements
+                for(size_t j = 0; j < batteryData.size(); ++j) {
+                    protocol->destroyValueData(&batteryData[j]);
+                }
+                g_ctx.batContainerQuery = false;  // Reset flag
+                return -1;  // Stop processing after error
             }
-            // check each battery sub tag
-            switch(batteryData[i].tag) {
-            case TAG_BAT_INDEX: {
-                ucBatteryIndex = protocol->getValueAsUChar8(&batteryData[i]);
-                break;
+            
+            // Skip BAT_INDEX in output (BAT_DCB_INFO is handled in container case)
+            if (batteryData[i].tag == TAG_BAT_INDEX) {
+                continue;
             }
-            case TAG_BAT_RSOC: {              // response for TAG_BAT_REQ_RSOC
-                float fSOC = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery SOC is %0.1f %%\n", fSOC);
-                break;
+            
+            // Special handling for DCB_COUNT in module dump mode
+            if (batteryData[i].tag == TAG_BAT_DCB_COUNT && g_ctx.modulInfoDump) {
+                uint8_t dcbCount = protocol->getValueAsUChar8(&batteryData[i]);
+                g_ctx.totalDCBs = dcbCount;
+                
+                // If we have DCBs and this is the first request, set up the multi-request loop
+                if (dcbCount > 0 && g_ctx.isFirstModuleDumpRequest) {
+                    g_ctx.needMoreDCBRequests = true;
+                    g_ctx.currentDCBIndex = 0;
+                    g_ctx.isFirstModuleDumpRequest = false;
+                } else if (dcbCount == 0) {
+                    // No DCBs - reset state
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;
+                }
+                // Continue to print DCB_COUNT in output
             }
-            case TAG_BAT_MODULE_VOLTAGE: {    // response for TAG_BAT_REQ_MODULE_VOLTAGE
-                float fVoltage = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery total voltage is %0.1f V\n", fVoltage);
-                break;
+            
+            // In quiet mode (single tag query), only process the requested tag's value
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && batteryData[i].tag != expectedResponseTag) {
+                continue;
             }
-            case TAG_BAT_CURRENT: {    // response for TAG_BAT_REQ_CURRENT
-                float fVoltage = protocol->getValueAsFloat32(&batteryData[i]);
-                printf("Battery current is %0.1f A\n", fVoltage);
-                break;
+            
+            // Mark that we found the requested tag
+            if (batteryData[i].tag == expectedResponseTag) {
+                foundRequestedTag = true;
             }
-            case TAG_BAT_STATUS_CODE: {    // response for TAG_BAT_REQ_STATUS_CODE
-                uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Battery status code is 0x%08X\n", uiErrorCode);
-                break;
+            
+            // Print tag prefix - formatted for module dump, raw for single query
+            // Skip printing BAT_DCB_INFO tag itself (only print its contents)
+            if (!g_ctx.quietMode && batteryData[i].tag != TAG_BAT_DCB_INFO) {
+                if (g_ctx.modulInfoDump) {
+                    // Friendly label for module info dump
+                    const char* label = getTagDescription(batteryData[i].tag);
+                    if (label) {
+                        printf("%s\n", label);
+                    } else {
+                        printf("Tag 0x%08X:\n", batteryData[i].tag);
+                    }
+                } else {
+                    printf("Tag 0x%08X: ", batteryData[i].tag);
+                }
             }
-            case TAG_BAT_ERROR_CODE: {    // response for TAG_BAT_REQ_ERROR_CODE
-                uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
-                printf("Battery error code is 0x%08X\n", uiErrorCode);
-                break;
+            
+            // Process battery value based on datatype - uses printFormattedValue for interpretations
+            switch(batteryData[i].dataType) {
+                case RSCP::eTypeFloat32: {
+                    float value = protocol->getValueAsFloat32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%.2f", value);
+                    // Use std::llround for proper rounding (handles negative values)
+                    int64_t roundedValue = std::llround(value);
+                    const char* interp = interpretValue(batteryData[i].tag, roundedValue);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump && interp) {
+                        printf("  %s (%s)\n", buf, interp);
+                    } else if (g_ctx.modulInfoDump) {
+                        printf("  %s\n", buf);
+                    } else if (interp) {
+                        printf("%s (%s)\n", buf, interp);
+                    } else {
+                        printf("%s\n", buf);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUChar8: {
+                    uint8_t value = protocol->getValueAsUChar8(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeInt32: {
+                    int32_t value = protocol->getValueAsInt32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d", value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt32: {
+                    uint32_t value = protocol->getValueAsUInt32(&batteryData[i]);
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%u", value);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", buf);
+                    } else if (g_ctx.modulInfoDump) {
+                        const char* interp = interpretValue(batteryData[i].tag, value);
+                        if (interp) {
+                            printf("  %s (%s)\n", buf, interp);
+                        } else {
+                            printf("  %s\n", buf);
+                        }
+                    } else {
+                        printFormattedValue(batteryData[i].tag, buf, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeString: {
+                    std::string str = protocol->getValueAsString(&batteryData[i]);
+                    if (g_ctx.modulInfoDump) {
+                        printf("  %s\n", str.c_str());
+                    } else {
+                        printf("%s\n", str.c_str());
+                    }
+                    break;
+                }
+                case RSCP::eTypeContainer: {
+                    // Handle nested containers - especially TAG_BAT_DCB_INFO
+                    if (batteryData[i].tag == TAG_BAT_DCB_INFO && g_ctx.modulInfoDump) {
+                        std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(&batteryData[i]);
+                        
+                        // Group DCB data by DCB_INDEX (ALWAYS parse, regardless of quiet mode)
+                        std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                        int8_t currentDcbIndex = -1;
+                        
+                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
+                            uint32_t tag = dcbInfoData[j].tag;
+                            
+                            if (tag == TAG_BAT_DCB_INDEX) {
+                                currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[j]);
+                                receivedDCBData = true;  // CRITICAL: Set flag regardless of output mode!
+                            } else if (currentDcbIndex >= 0) {
+                                // Check if this is a DCB-related tag
+                                if ((tag & 0xFFF00000) == 0x03800000) {
+                                    dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[j]));
+                                }
+                            }
+                        }
+                        
+                        // Print grouped DCB data (only if NOT in quiet mode)
+                        if (!g_ctx.quietMode && dcbData.size() > 0) {
+                            for (auto& dcbPair : dcbData) {
+                                printf("Zellblock #%u\n", dcbPair.first);
+                                for (auto& tagValuePair : dcbPair.second) {
+                                    const char* label = getTagDescription(tagValuePair.first);
+                                    if (label) {
+                                        printf("%s\n", label);
+                                    } else {
+                                        printf("Tag 0x%08X:\n", tagValuePair.first);
+                                    }
+                                    
+                                    // Formatiere Wert mit 2 Leerzeichen Abstand
+                                    switch(tagValuePair.second.dataType) {
+                                        case RSCP::eTypeBool:
+                                            printf("  %s\n", protocol->getValueAsBool(&tagValuePair.second) ? "true" : "false");
+                                            break;
+                                        case RSCP::eTypeChar8:
+                                            printf("  %d\n", protocol->getValueAsChar8(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUChar8:
+                                            printf("  %u\n", protocol->getValueAsUChar8(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeInt16:
+                                            printf("  %d\n", protocol->getValueAsInt16(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt16:
+                                            printf("  %u\n", protocol->getValueAsUInt16(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeInt32:
+                                            printf("  %d\n", protocol->getValueAsInt32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt32:
+                                            printf("  %u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeInt64:
+                                            printf("  %lld\n", (long long)protocol->getValueAsInt64(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeUInt64: {
+                                            uint64_t value = protocol->getValueAsUInt64(&tagValuePair.second);
+                                            // Special formatting for timestamp tags
+                                            if (tagValuePair.first == TAG_BAT_DCB_LAST_MESSAGE_TIMESTAMP) {
+                                                std::string formatted = formatTimestamp(value);
+                                                printf("  %s\n", formatted.c_str());
+                                            } else {
+                                                printf("  %llu\n", (unsigned long long)value);
+                                            }
+                                            break;
+                                        }
+                                        case RSCP::eTypeFloat32:
+                                            printf("  %.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeDouble64:
+                                            printf("  %.4f\n", protocol->getValueAsDouble64(&tagValuePair.second));
+                                            break;
+                                        case RSCP::eTypeString: {
+                                            std::string str = protocol->getValueAsString(&tagValuePair.second);
+                                            if (str.empty()) {
+                                                printf("  (leer)\n");
+                                            } else {
+                                                printf("  %s\n", str.c_str());
+                                            }
+                                            break;
+                                        }
+                                        case RSCP::eTypeBitfield: {
+                                            // Bitfield als Hex ausgeben
+                                            uint32_t bitfield = 0;
+                                            if (tagValuePair.second.length == 1) {
+                                                bitfield = protocol->getValueAsUChar8(&tagValuePair.second);
+                                            } else if (tagValuePair.second.length == 2) {
+                                                bitfield = protocol->getValueAsUInt16(&tagValuePair.second);
+                                            } else if (tagValuePair.second.length == 4) {
+                                                bitfield = protocol->getValueAsUInt32(&tagValuePair.second);
+                                            }
+                                            printf("  0x%0*X\n", tagValuePair.second.length * 2, bitfield);
+                                            break;
+                                        }
+                                        case RSCP::eTypeByteArray: {
+                                            // ByteArray als Hex ausgeben
+                                            printf("  0x");
+                                            for (uint16_t k = 0; k < tagValuePair.second.length; k++) {
+                                                printf("%02X", tagValuePair.second.data[k]);
+                                            }
+                                            printf("\n");
+                                            break;
+                                        }
+                                        default:
+                                            printf("  (Typ %d)\n", tagValuePair.second.dataType);
+                                            break;
+                                    }
+                                }
+                                printf("\n");
+                            }
+                        }
+                        
+                        // Clean up
+                        for(size_t j = 0; j < dcbInfoData.size(); ++j) {
+                            protocol->destroyValueData(&dcbInfoData[j]);
+                        }
+                    } else if (!g_ctx.quietMode) {
+                        printf("(Container mit %zu Elementen)\n", 
+                               protocol->getValueAsContainer(&batteryData[i]).size());
+                    }
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Unbekannter Datentyp %d\n", batteryData[i].dataType);
+                    }
+                    break;
             }
-            // ...
-            default:
-                // default behaviour
-                printf("Unknown battery tag %08X\n", response->tag);
+            
+            // In quiet mode (single tag query), stop after printing the requested value
+            if (g_ctx.quietMode && !g_ctx.modulInfoDump && foundRequestedTag) {
                 break;
             }
         }
-        protocol->destroyValueData(batteryData);
+        
+        // In quiet mode (single tag query), if we didn't find the requested tag, output error
+        if (g_ctx.quietMode && !g_ctx.modulInfoDump && !foundRequestedTag) {
+            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in Response gefunden\n", expectedResponseTag);
+        }
+        
+        // CRITICAL: Multi-DCB Loop Management
+        // Only increment if we actually received DCB data (not just battery-level response)
+        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump && receivedDCBData) {
+            g_ctx.currentDCBIndex++;
+            
+            // Check if we've queried all DCBs
+            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                g_ctx.needMoreDCBRequests = false;
+                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+            }
+        }
+        
+        // Clean up vector elements properly
+        for(size_t i = 0; i < batteryData.size(); ++i) {
+            protocol->destroyValueData(&batteryData[i]);
+        }
+        
+        g_ctx.batContainerQuery = false;  // Reset flag after successful processing
         break;
        }
+       
+        case TAG_BAT_DCB_INFO: {        // response for TAG_BAT_REQ_DCB_INFO
+            if (!g_ctx.modulInfoDump || g_ctx.quietMode) {
+                break;  // Only process in module info dump mode
+            }
+            
+            // TAG_BAT_DCB_INFO can be either a single container (1 DCB) or a container of containers (multiple DCBs)
+            // We need to handle both cases
+            
+            // First, check if this is a container of containers or just a single DCB container
+            std::vector<SRscpValue> dcbInfoData = protocol->getValueAsContainer(response);
+            
+            // Check if the first element is BAT_DCB_INDEX (single DCB) or another container (multiple DCBs)
+            if (dcbInfoData.size() > 0) {
+                // If first element is BAT_DCB_INDEX, it's a single DCB container
+                // Otherwise, it might be multiple containers
+                
+                bool isSingleDCB = (dcbInfoData[0].tag == TAG_BAT_DCB_INDEX);
+                
+                if (isSingleDCB) {
+                    // Single DCB: process directly - reuse the same logic as multiple DCBs
+                    std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                    int8_t currentDcbIndex = -1;
+                    
+                    for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                        uint32_t tag = dcbInfoData[i].tag;
+                        
+                        if (tag == TAG_BAT_DCB_INDEX) {
+                            currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
+                        } else if (currentDcbIndex >= 0) {
+                            if ((tag & 0xFFF00000) == 0x03800000) {
+                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
+                            }
+                        }
+                    }
+                    
+                    // Print the single DCB
+                    if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        printf("\n  === DCB Zellblöcke ===\n");
+                        for (auto& dcbPair : dcbData) {
+                            printf("  Zellblock %u:\n", dcbPair.first);
+                            
+                            for (auto& tagValuePair : dcbPair.second) {
+                                const char* label = getTagDescription(tagValuePair.first);
+                                if (label) {
+                                    printf("    %-35s ", label);
+                                } else {
+                                    printf("    Tag 0x%08X:                     ", tagValuePair.first);
+                                }
+                                
+                                switch(tagValuePair.second.dataType) {
+                                    case RSCP::eTypeFloat32:
+                                        printf("%.2f\n", protocol->getValueAsFloat32(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeUChar8:
+                                        printf("%u\n", protocol->getValueAsUChar8(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeUInt32:
+                                        printf("%u\n", protocol->getValueAsUInt32(&tagValuePair.second));
+                                        break;
+                                    case RSCP::eTypeInt32:
+                                        printf("%d\n", protocol->getValueAsInt32(&tagValuePair.second));
+                                        break;
+                                    default:
+                                        printf("(Typ %d)\n", tagValuePair.second.dataType);
+                                        break;
+                                }
+                            }
+                            printf("\n");
+                        }
+                    }
+                } else {
+                    // Multiple DCBs: each element might be a container
+                    // Group data by DCB_INDEX
+                    std::map<uint8_t, std::vector<std::pair<uint32_t, SRscpValue>>> dcbData;
+                    int8_t currentDcbIndex = -1;
+                    
+                    for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                        uint32_t tag = dcbInfoData[i].tag;
+                        
+                        if (tag == TAG_BAT_DCB_INDEX) {
+                            currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
+                            DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
+                        } else if (currentDcbIndex >= 0) {
+                            // Check if this is a DCB-related tag
+                            if ((tag & 0xFFF00000) == 0x03800000) {
+                                dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
+                                DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
+                            }
+                        }
+                    }
+                    
+                    // Print grouped DCB data
+                    if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        printf("\n  === DCB Zellblöcke ===\n");
+                        for (auto& dcbPair : dcbData) {
+                            printf("  Zellblock %u:\n", dcbPair.first);
+                            
+                            for (auto& tagValuePair : dcbPair.second) {
+                                const char* label = getTagDescription(tagValuePair.first);
+                                if (label) {
+                                    printf("    %-35s ", label);
+                                } else {
+                                    printf("    Tag 0x%08X:                     ", tagValuePair.first);
+                                }
+                                
+                                // Print value based on type
+                                switch(tagValuePair.second.dataType) {
+                                    case RSCP::eTypeFloat32: {
+                                        float val = protocol->getValueAsFloat32(&tagValuePair.second);
+                                        printf("%.2f\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeUChar8: {
+                                        uint8_t val = protocol->getValueAsUChar8(&tagValuePair.second);
+                                        printf("%u\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeUInt32: {
+                                        uint32_t val = protocol->getValueAsUInt32(&tagValuePair.second);
+                                        printf("%u\n", val);
+                                        break;
+                                    }
+                                    case RSCP::eTypeInt32: {
+                                        int32_t val = protocol->getValueAsInt32(&tagValuePair.second);
+                                        printf("%d\n", val);
+                                        break;
+                                    }
+                                    default:
+                                        printf("(Typ %d)\n", tagValuePair.second.dataType);
+                                        break;
+                                }
+                            }
+                            printf("\n");
+                        }
+                    }
+                }
+            }
+            
+            // Clean up
+            for(size_t i = 0; i < dcbInfoData.size(); ++i) {
+                protocol->destroyValueData(&dcbInfoData[i]);
+            }
+            
+            // After processing DCB response, check if we need more DCB requests
+            if (g_ctx.needMoreDCBRequests) {
+                g_ctx.currentDCBIndex++;
+                DEBUG("DCB #%u verarbeitet, nächster Index: %u von %u\n", 
+                      g_ctx.currentDCBIndex - 1, g_ctx.currentDCBIndex, g_ctx.totalDCBs);
+                
+                // Check if we've queried all DCBs
+                if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                    DEBUG("Alle %u DCBs abgefragt - Multi-Request-Loop beendet\n", g_ctx.totalDCBs);
+                }
+            }
+            
+            break;
+        }
 
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;
@@ -937,11 +1590,17 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 case RSCP::eTypeTimestamp: {
                     SRscpTimestamp ts = protocol->getValueAsTimestamp(response);
                     if (!g_ctx.quietMode) {
-                        time_t seconds = (time_t)ts.seconds;
-                        struct tm *timeinfo = localtime(&seconds);
-                        char timeStr[80];
-                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", timeinfo);
-                        printf("%s.%03u\n", timeStr, ts.nanoseconds / 1000000);
+                        // Validate timestamp is in reasonable range (2000-2100)
+                        if (ts.seconds > 946684800ULL && ts.seconds < 4102444800ULL) {
+                            time_t seconds = (time_t)ts.seconds;
+                            struct tm timeinfo;
+                            localtime_r(&seconds, &timeinfo);
+                            char timeStr[80];
+                            strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+                            printf("%s.%03u\n", timeStr, ts.nanoseconds / 1000000);
+                        } else {
+                            printf("%lld.%09u (ungültiger Timestamp)\n", (long long)ts.seconds, ts.nanoseconds);
+                        }
                     } else {
                         printf("%llu.%09u\n", (unsigned long long)ts.seconds, ts.nanoseconds);
                     }
@@ -1142,14 +1801,23 @@ static void mainLoop(void)
             else {
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
-                if (counter > 0) bStopExecution = true; // #MS# end program after first receive
+                
+                // After first receive, check if we need more DCB requests
+                if (counter > 0) {
+                    if (!g_ctx.needMoreDCBRequests) {
+                        // No more requests needed - stop
+                        bStopExecution = true;
+                    }
+                }
             }
         }
         // free frame buffer memory
         protocol.destroyFrameData(&frameBuffer);
 
-        // main loop sleep / cycle time before next request
-        sleep(1);
+        // main loop sleep / cycle time before next request (only if continuing)
+        if (!bStopExecution) {
+            sleep(1);
+        }
 
         counter++;
 
@@ -1262,31 +1930,42 @@ void printTagList(int category) {
 }
 
 void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -r TAG_NAME [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-E Reserve] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -m <Modul-Index> [-p Pfad zur Konfigurationsdatei]\n");
     fprintf(stderr, "          e3dcset -l [kategorie]\n");
     fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
     fprintf(stderr, "   Optionen:\n");
     fprintf(stderr, "     -c  LadeLeistung in Watt setzen\n");
     fprintf(stderr, "     -d  EntladeLeistung in Watt setzen\n");
     fprintf(stderr, "     -e  Manuelle Ladungsmenge in Wh setzen (0 = stoppen)\n");
+    fprintf(stderr, "     -E  Notstromreserve in Wh setzen (Workaround fuer Netzladung)\n");
     fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
     fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
+    fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
+    fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
     fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
     fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
     fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
     fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
     fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
-    fprintf(stderr, "   Hinweis: -r und -H können nicht mit -c, -d, -e oder -a kombiniert werden\n\n");
+    fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e, -E oder -a kombiniert werden\n\n");
     fprintf(stderr, "   Beispiele:\n");
     fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
     fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
     fprintf(stderr, "     e3dcset -r EMS_POWER_PV         # PV-Leistung abfragen\n");
     fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
+    fprintf(stderr, "     e3dcset -m 0                    # Alle Werte von Modul 0\n");
+    fprintf(stderr, "     e3dcset -m 1                    # Alle Werte von Modul 1\n");
     fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
     fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
+    fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
+    fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
     fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n\n");
     exit(EXIT_FAILURE);
 }
@@ -1349,9 +2028,9 @@ void readConfig(void){
         DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
         DEBUG("server_ip=%s\n",e3dc_config.server_ip);
         DEBUG("server_port=%i\n",e3dc_config.server_port);
-        DEBUG("e3dc_user=%s\n",e3dc_config.e3dc_user);
-        DEBUG("e3dc_password=%s\n",e3dc_config.e3dc_password);
-        DEBUG("aes_password=%s\n",e3dc_config.aes_password);
+        DEBUG("e3dc_user=%s\n", strlen(e3dc_config.e3dc_user) > 0 ? "***@***" : "");
+        DEBUG("e3dc_password=%s\n", strlen(e3dc_config.e3dc_password) > 0 ? "********" : "");
+        DEBUG("aes_password=%s\n", strlen(e3dc_config.aes_password) > 0 ? "********" : "");
         DEBUG("----------------------------------------------------------\n");
 
         fclose(fp);
@@ -1366,13 +2045,18 @@ void readConfig(void){
 
 void checkArguments(void){
 
-    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung)){
-        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
+    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
+        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
         exit(EXIT_FAILURE);
     }
     
-    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen)){
-        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e] oder [-a] verwendet werden\n\n");
+    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen || g_ctx.setEPReserve)){
+        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    if (g_ctx.setEPReserve && g_ctx.epReserveWh < 0){
+        fprintf(stderr, "[-E] Notstromreserve muss >= 0 Wh sein\n\n");
         exit(EXIT_FAILURE);
     }
 
@@ -1420,7 +2104,7 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
 
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage){
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }
@@ -1475,7 +2159,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:ap:r:qlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
@@ -1492,6 +2176,10 @@ int main(int argc, char *argv[])
         case 'e':
                 g_ctx.manuelleSpeicherladung = true;
                 g_ctx.ladungsMenge = atoi(optarg);
+                break;
+        case 'E':
+                g_ctx.setEPReserve = true;
+                g_ctx.epReserveWh = (float)atof(optarg);
                 break;
         case 'a':
                 g_ctx.leistungAendern = true;
@@ -1532,6 +2220,13 @@ int main(int argc, char *argv[])
                     // Tag-Namen speichern für spätere Konvertierung (nach loadTagsFile)
                     g_ctx.tagName = strdup(optarg);
                 }
+                break;
+        case 'i':
+                g_ctx.batIndex = (uint16_t)atoi(optarg);
+                break;
+        case 'm':
+                g_ctx.modulInfoDump = true;
+                g_ctx.batIndex = (uint16_t)atoi(optarg);
                 break;
         case 'q':
                 g_ctx.quietMode = true;

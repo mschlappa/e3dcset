@@ -23,19 +23,73 @@ EMS_EMERGENCY_POWER_STATUS = 0x01000095 # Notstrom-Status
 EMS_GET_SYS_SPECS = 0x01000098 # System-Spezifikationen
 
 [BAT]
-BAT_DATA = 0x03040000 # Batterie-Daten Container
-BAT_RSOC = 0x03000001 # Relativer Ladezustand (%)
-BAT_MODULE_VOLTAGE = 0x03000002 # Modul-Spannung (V)
-BAT_CURRENT = 0x03000003 # Batterie-Strom (A)
-BAT_MAX_BAT_VOLTAGE = 0x03000004 # Maximale Batterie-Spannung (V)
-BAT_MAX_CHARGE_CURRENT = 0x03000005 # Maximaler Ladestrom (A)
-BAT_MAX_DISCHARGE_CURRENT = 0x03000007 # Maximaler Entladestrom (A)
-BAT_CHARGE_CYCLES = 0x03000008 # Anzahl Ladezyklen
-BAT_TERMINAL_VOLTAGE = 0x03000009 # Klemmenspannung (V)
-BAT_STATUS_CODE = 0x0300000A # Status-Code
-BAT_ERROR_CODE = 0x0300000B # Fehler-Code
-BAT_DEVICE_NAME = 0x0300000C # Geräte-Name
-BAT_DEVICE_STATE = 0x03060000 # Geräte-Status
+BAT_REQ_DATA = 0x03040000 # Batterie-Daten Container (REQUEST)
+BAT_INDEX = 0x03040001 # Batterie-Index (für Multi-Batterie Systeme)
+BAT_DATA = 0x03840000 # Batterie-Daten Container (RESPONSE)
+BAT_REQ_RSOC = 0x03000001 # Relativer Ladezustand (%)
+BAT_RSOC = 0x03800001 # Relativer Ladezustand (%)
+BAT_REQ_ASOC = 0x0300000F # State of Health (%)
+BAT_ASOC = 0x0380000F # State of Health (%)
+BAT_REQ_MODULE_VOLTAGE = 0x03000002 # Modulspannung (V)
+BAT_MODULE_VOLTAGE = 0x03800002 # Modulspannung (V)
+BAT_REQ_CURRENT = 0x03000003 # Batterie-Strom (A)
+BAT_CURRENT = 0x03800003 # Batterie-Strom (A)
+BAT_REQ_MAX_BAT_VOLTAGE = 0x03000004 # Max. Batteriespannung (V)
+BAT_MAX_BAT_VOLTAGE = 0x03800004 # Max. Batteriespannung (V)
+BAT_REQ_MAX_CHARGE_CURRENT = 0x03000005 # Maximaler Ladestrom (A)
+BAT_REQ_MAX_DISCHARGE_CURRENT = 0x03000007 # Maximaler Entladestrom (A)
+BAT_REQ_CHARGE_CYCLES = 0x03000008 # Anzahl Ladezyklen
+BAT_CHARGE_CYCLES = 0x03800008 # Anzahl Ladezyklen
+BAT_REQ_TERMINAL_VOLTAGE = 0x03000009 # Klemmenspannung (V)
+BAT_REQ_STATUS_CODE = 0x0300000A # Batterie-Statuscode
+BAT_STATUS_CODE = 0x0380000A # Batterie-Statuscode
+BAT_REQ_ERROR_CODE = 0x0300000B # Fehler-Code
+BAT_ERROR_CODE = 0x0380000B # Fehler-Code
+BAT_REQ_DEVICE_NAME = 0x0300000C # Geräte-Name
+BAT_DEVICE_NAME = 0x0380000C # Geräte-Name
+BAT_REQ_DCB_COUNT = 0x0300000D # Anzahl DCB Module
+BAT_DCB_COUNT = 0x0380000D # Anzahl DCB Module
+BAT_REQ_INFO = 0x03000020 # Batterie-Info (allgemein)
+BAT_INFO = 0x03800020 # Batterie-Info Container
+BAT_REQ_DCB_INFO = 0x03000042 # DCB-Zellblock-Info (gibt Container-Array zurück)
+BAT_DCB_INFO = 0x03800042 # DCB-Zellblock-Info Container
+BAT_REQ_DEVICE_STATE = 0x03060000 # Geräte-Status REQUEST
+BAT_DEVICE_STATE = 0x03860000 # Geräte-Status RESPONSE
+BAT_DCB_INDEX = 0x03800100 # Index
+BAT_DCB_LAST_MESSAGE_TIMESTAMP = 0x03800101 # Letzte Meldung
+BAT_DCB_MAX_CHARGE_VOLTAGE = 0x03800102 # Max. Ladespannung (V)
+BAT_DCB_MAX_CHARGE_CURRENT = 0x03800103 # Max. Ladestrom (A)
+BAT_DCB_END_OF_DISCHARGE = 0x03800104 # Entlade-Endspannung (V)
+BAT_DCB_MAX_DISCHARGE_CURRENT = 0x03800105 # Max. Entladestrom (A)
+BAT_DCB_FULL_CHARGE_CAPACITY = 0x03800106 # Volle Ladekapazität (Wh)
+BAT_DCB_REMAINING_CAPACITY = 0x03800107 # Verbleibende Kapazität (Wh)
+BAT_DCB_SOC = 0x03800108 # Module State of Charge (%)
+BAT_DCB_SOH = 0x03800109 # Module State of Health (%)
+BAT_DCB_CYCLE_COUNT = 0x03800110 # Ladezyklen
+BAT_DCB_CURRENT = 0x03800111 # Strom (A)
+BAT_DCB_VOLTAGE = 0x03800112 # Spannung (V)
+BAT_DCB_CURRENT_AVG_30S = 0x03800113 # Strom 30s Durchschnitt (A)
+BAT_DCB_VOLTAGE_AVG_30S = 0x03800114 # Spannung 30s Durchschnitt (V)
+BAT_DCB_DESIGN_CAPACITY = 0x03800115 # Design-Kapazität (Wh)
+BAT_DCB_DESIGN_VOLTAGE = 0x03800116 # Design-Spannung (V)
+BAT_DCB_CHARGE_LOW_TEMPERATURE = 0x03800117 # Min. Ladetemperatur (°C)
+BAT_DCB_CHARGE_HIGH_TEMPERATURE = 0x03800118 # Max. Ladetemperatur (°C)
+BAT_DCB_MANUFACTURE_DATE = 0x03800119 # Herstellungsdatum
+BAT_DCB_SERIALNO = 0x03800120 # Seriennummer
+BAT_DCB_PROTOCOL_VERSION = 0x03800121 # Protokoll-Version
+BAT_DCB_FW_VERSION = 0x03800122 # Firmware-Version
+BAT_DCB_DATA_TABLE_VERSION = 0x03800123 # Datentabellen-Version
+BAT_DCB_PCB_VERSION = 0x03800124 # PCB-Version
+BAT_DCB_NR_SERIES_CELL = 0x03800300 # Anzahl Serienzellen
+BAT_DCB_NR_PARALLEL_CELL = 0x03800301 # Anzahl Parallelzellen
+BAT_DCB_MANUFACTURE_NAME = 0x03800302 # Herstellername
+BAT_DCB_DEVICE_NAME = 0x03800303 # Gerätename
+BAT_DCB_SERIALCODE = 0x03800304 # Seriencode
+BAT_DCB_NR_SENSOR = 0x03800305 # Anzahl Sensoren
+BAT_DCB_STATUS = 0x03800306 # Status Flags
+BAT_DCB_WARNING = 0x03800307 # Warning Flags
+BAT_DCB_ALARM = 0x03800308 # Alarm Flags
+BAT_DCB_ERROR = 0x03800309 # Error Flags
 
 [PVI]
 PVI_DATA = 0x02040000 # PV-Wechselrichter Daten Container
@@ -191,3 +245,14 @@ DB_AUTARKY = 0x0680000D # Response: Autarkiegrad (%)
 0x0500000A:0 = OK (kein Fehler)
 0x0E000005:0 = OK (kein Fehler)
 0x04000010:0 = OK (kein Fehler)
+
+# Emergency Power (EP) Tags - Kategorie 10 (Notstrom)
+# Namespace 0x1B
+EP_REQ_EP_RESERVE:0x1B000009:Notstromreserve abfragen
+EP_REQ_SET_EP_RESERVE:0x1B000010:Notstromreserve setzen
+EP_EP_RESERVE:0x1B800009:Notstromreserve Response
+EP_SET_EP_RESERVE:0x1B800010:Notstromreserve gesetzt Response
+EP_PARAM_INDEX:0x1B040000:Parameter-Index
+EP_PARAM_EP_RESERVE:0x1B040023:Reserve in Prozent (0-50%)
+EP_PARAM_EP_RESERVE_ENERGY:0x1B040033:Reserve in Wh
+EP_PARAM_EP_RESERVE_MAX_ENERGY:0x1B040034:Max Reserve in Wh

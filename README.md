@@ -8,6 +8,7 @@ Ein leistungsstarkes Linux-Kommandozeilen-Tool zur Steuerung und Überwachung vo
 - Batterie-Lade-/Entladeleistung einstellen
 - Wechsel zum automatischen Leistungsmanagement
 - Manuelle Batterie-Ladung mit spezifischer Energiemenge starten/stoppen
+- Notstromreserve setzen (Workaround für Netzladung)
 
 📊 **Daten-Abfragen**
 - Echtzeit-Werte von beliebigen RSCP-Tags abfragen
@@ -98,6 +99,20 @@ Manuelles Laden mit 5kWh bei 2400W starten:
 Laufendes manuelles Laden stoppen:
 ```bash
 ./e3dcset -e 0
+```
+
+### Notstromreserve setzen (Workaround für Netzladung)
+
+Da das manuelle Laden (`-e`) nur bedingt zuverlässig funktioniert, kann über die Notstromreserve eine Netzladung erzwungen werden. Das E3DC lädt die Batterie automatisch aus dem Netz, bis die Reserve erreicht ist.
+
+Notstromreserve auf 3000 Wh setzen:
+```bash
+./e3dcset -E 3000
+```
+
+Notstromreserve deaktivieren:
+```bash
+./e3dcset -E 0
 ```
 
 ### Echtzeit-Werte abfragen
@@ -295,6 +310,7 @@ Leistungssteuerung:
   -c <watt>     Ladeleistung einstellen (Watt)
   -d <watt>     Entladeleistung einstellen (Watt, 1 = deaktiviert)
   -e <wh>       Manuelles Laden mit Energiemenge starten (Wh, 0 = stoppen)
+  -E <wh>       Notstromreserve setzen (Wh, 0 = deaktivieren)
   -a            Zurück zu automatischem Leistungsmanagement
 
 Daten-Abfragen:
@@ -315,8 +331,8 @@ Konfiguration:
 
 ### Wichtige Einschränkungen
 
-- `-r` kann nicht mit `-c`, `-d`, `-e`, `-a` oder `-H` kombiniert werden
-- `-H` kann nicht mit `-r`, `-c`, `-d`, `-e` oder `-a` kombiniert werden
+- `-r` kann nicht mit `-c`, `-d`, `-e`, `-E`, `-a` oder `-H` kombiniert werden
+- `-H` kann nicht mit `-r`, `-c`, `-d`, `-e`, `-E` oder `-a` kombiniert werden
 - `-q` kann nur mit `-r` verwendet werden
 - `-D` kann nur mit `-H` verwendet werden
 - Nur REQUEST-Tags können abgefragt werden (zweites Byte < 0x80)
@@ -505,6 +521,6 @@ Bei Fragen oder Problemen:
 
 ---
 
-**Version**: 2.0  
-**Zuletzt aktualisiert**: 21.11.2025  
+**Version**: 2.1  
+**Zuletzt aktualisiert**: 28.12.2025  
 **Betreut**: Community-gesteuert

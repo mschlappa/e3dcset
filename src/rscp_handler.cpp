@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <cmath>
+#include <time.h>
 
 // RSCP connection state
 int iSocket = -1;
@@ -1528,6 +1529,15 @@ void mainLoop(void)
 
     while(!bStopExecution)
     {
+        // Check for watch mode interruption (Ctrl+C)
+        if (g_ctx.watchMode && g_watchInterrupted) {
+            if (!g_ctx.quietMode && !g_ctx.jsonOutput) {
+                printf("\n[Watch mode interrupted]\n");
+            }
+            bStopExecution = true;
+            break;
+        }
+
         //--------------------------------------------------------------------------------------------------------------
         // RSCP Transmit Frame Block Data
         //--------------------------------------------------------------------------------------------------------------
@@ -1564,7 +1574,33 @@ void mainLoop(void)
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
                 
-                // After first receive, check if we need more DCB requests
+                // Watch mode: continue polling after successful response
+                if (g_ctx.watchMode && counter > 0) {
+                    // Output timestamp prefix for next iteration
+                    if (!g_ctx.quietMode) {
+                        time_t now = time(NULL);
+                        struct tm *tm_info = localtime(&now);
+                        char timeStr[64];
+                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", tm_info);
+                        
+                        if (g_ctx.jsonOutput) {
+                            // JSON mode: just print timestamp (output.cpp will handle the rest)
+                            // Timestamp will be embedded in JSON by output functions
+                        } else {
+                            // Normal mode: print separator with timestamp
+                            printf("\n--- %s ---\n", timeStr);
+                        }
+                    }
+                    
+                    // Sleep before next poll
+                    sleep(g_ctx.watchInterval);
+                    
+                    // Reset authentication flag to force re-connection if needed
+                    // (connection stays open, but we re-authenticate on errors)
+                    continue; // Continue watch loop
+                }
+                
+                // Non-watch mode: After first receive, check if we need more DCB requests
                 if (counter > 0) {
                     if (!g_ctx.needMoreDCBRequests) {
                         // No more requests needed - stop
@@ -1577,7 +1613,7 @@ void mainLoop(void)
         protocol.destroyFrameData(&frameBuffer);
 
         // main loop sleep / cycle time before next request (only if continuing)
-        if (!bStopExecution) {
+        if (!bStopExecution && !g_ctx.watchMode) {
             sleep(1);
         }
 

@@ -2,10 +2,21 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
+#include <getopt.h>
 #include "config.h"
 #include "rscp_handler.h"
 #include "output.h"
 #include "SocketConnection.h"
+
+// Global flag for watch mode interruption
+volatile sig_atomic_t g_watchInterrupted = 0;
+
+// Signal handler for watch mode (Ctrl+C)
+void watchSignalHandler(int signum) {
+    (void)signum; // Unused parameter
+    g_watchInterrupted = 1;
+}
 
 int main(int argc, char *argv[])
 {
@@ -14,8 +25,15 @@ int main(int argc, char *argv[])
     }
     
     int opt;
+    int option_index = 0;
+    
+    static struct option long_options[] = {
+        {"watch", no_argument, 0, 'w'},
+        {"interval", required_argument, 0, 1},
+        {0, 0, 0, 0}
+    };
 
-    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:w", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'c':
             g_ctx.leistungAendern = true;
@@ -105,6 +123,16 @@ int main(int argc, char *argv[])
                 g_ctx.listCategory = 0;
             }
             break;
+        case 'w':
+            g_ctx.watchMode = true;
+            break;
+        case 1: // --interval
+            g_ctx.watchInterval = (uint32_t)atoi(optarg);
+            if (g_ctx.watchInterval < 1) {
+                fprintf(stderr, "Fehler: Interval muss mindestens 1 Sekunde sein\n");
+                exit(EXIT_FAILURE);
+            }
+            break;
         default:
             usage();
         }
@@ -141,6 +169,15 @@ int main(int argc, char *argv[])
 
     // Argumente der Kommandozeile plausibilisieren
     checkArguments();
+
+    // Register signal handler for watch mode (Ctrl+C)
+    if (g_ctx.watchMode) {
+        struct sigaction sa;
+        sa.sa_handler = watchSignalHandler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sigaction(SIGINT, &sa, NULL);
+    }
 
     // Verbinde mit Hauskraftwerk
     connectToServer();

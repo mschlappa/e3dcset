@@ -257,6 +257,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         uint8_t ucAccessLevel = protocol->getValueAsUChar8(response);
         if(ucAccessLevel > 0) {
             iAuthenticated = 1;
+        } else {
+            fprintf(stderr, "FEHLER: Authentifizierung fehlgeschlagen - Zugriff verweigert\n");
+            exit(EXIT_FAILURE);
         }
         DEBUG("RSCP authentitication level %i\n", ucAccessLevel);
         break;

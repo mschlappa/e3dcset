@@ -32,13 +32,8 @@ jobs:
         file e3dcset
         ldd e3dcset || true
     
-    - name: Run tests (if available)
-      run: |
-        if [ -d tests ]; then
-          make test || echo "No tests yet"
-        else
-          echo "Test directory not yet created - skipping"
-        fi
+    - name: Run tests
+      run: make test
 
   build-macos:
     runs-on: macos-latest
@@ -57,10 +52,5 @@ jobs:
         file e3dcset
         otool -L e3dcset || true
     
-    - name: Run tests (if available)
-      run: |
-        if [ -d tests ]; then
-          make test || echo "No tests yet"
-        else
-          echo "Test directory not yet created - skipping"
-        fi
+    - name: Run tests
+      run: make test

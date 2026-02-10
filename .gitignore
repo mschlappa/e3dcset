@@ -16,3 +16,6 @@ e3dcset
 # Replit project metadata
 .replit
 replit.md
+
+# Test files
+test_*.config

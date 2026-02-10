@@ -5,7 +5,11 @@
  *      Author: dikirile
  */
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <sys/time.h>
 #ifdef WINNT
 #include <windows.h>
@@ -26,8 +30,8 @@ bool RscpProtocol::setHeaderTimestamp(SRscpFrame *frame) {
 	}
 
 	bool bTimeSet = false;
-#if defined(__linux__)
-	// get linux timestamp
+#if defined(__linux__) || defined(__APPLE__)
+	// get linux/macOS timestamp
 	struct timeval timeVal;
 	gettimeofday(&timeVal, NULL);
 	// set frame timestamp
@@ -45,8 +49,8 @@ bool RscpProtocol::setHeaderTimestamp(SRscpFrame *frame) {
 #else
 #warning No time source is available.
 	// unknown
-	frame->header.timeSec = 0;
-	frame->header.timeNanosec = 0;
+	frame->header.timestamp.seconds = 0;
+	frame->header.timestamp.nanoseconds = 0;
 #endif
 
 	return bTimeSet;

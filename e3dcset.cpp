@@ -121,6 +121,15 @@ struct CommandContext {
         historieDatum(NULL),
         historieTyp(NULL)
     {}
+    
+    // Destructor - free all dynamically allocated strings
+    ~CommandContext() {
+        free(configPath);
+        free(tagfilePath);
+        free(tagName);
+        free(historieDatum);
+        free(historieTyp);
+    }
 };
 
 static int iSocket = -1;
@@ -2186,13 +2195,16 @@ int main(int argc, char *argv[])
                 g_ctx.automatischLeistungEinstellen = true;
                 break;
         case 'p':
+                free(g_ctx.configPath);
                 g_ctx.configPath = strdup(optarg);
                 break;
         case 't':
+                free(g_ctx.tagfilePath);
                 g_ctx.tagfilePath = strdup(optarg);
                 break;
         case 'H':
                 g_ctx.historieAbfrage = true;
+                free(g_ctx.historieTyp);
                 g_ctx.historieTyp = strdup(optarg);
                 if (strcmp(optarg, "day") != 0 && strcmp(optarg, "week") != 0 &&
                     strcmp(optarg, "month") != 0 && strcmp(optarg, "year") != 0) {
@@ -2202,6 +2214,7 @@ int main(int argc, char *argv[])
                 }
                 break;
         case 'D':
+                free(g_ctx.historieDatum);
                 g_ctx.historieDatum = strdup(optarg);
                 break;
         case 'r':
@@ -2218,6 +2231,7 @@ int main(int argc, char *argv[])
                     }
                 } else {
                     // Tag-Namen speichern für spätere Konvertierung (nach loadTagsFile)
+                    free(g_ctx.tagName);
                     g_ctx.tagName = strdup(optarg);
                 }
                 break;

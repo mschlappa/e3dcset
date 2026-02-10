@@ -727,11 +727,13 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 
                 // Max 3 retries per DCB index to prevent infinite loops
                 if (g_ctx.dcbRequestRetries >= 3) {
-                    fprintf(stderr, "ERROR: Failed to receive DCB data for index %d after 3 attempts\n",
+                    fprintf(stderr, "WARNING: DCB #%d failed after 3 attempts - skipping\n",
                             g_ctx.currentDCBIndex);
-                    fprintf(stderr, "       Aborting DCB requests to prevent infinite loop\n");
-                    g_ctx.needMoreDCBRequests = false;
-                    g_ctx.isFirstModuleDumpRequest = true;
+                    g_ctx.dcbRequestRetries = 0;
+                    g_ctx.currentDCBIndex++;  // Weiter mit nächstem DCB
+                    if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                        g_ctx.needMoreDCBRequests = false;
+                    }
                 }
             }
         }

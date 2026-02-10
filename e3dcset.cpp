@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
 #include "RscpProtocol.h"
 #include "RscpTags.h"
 #include "SocketConnection.h"
@@ -1979,6 +1980,35 @@ void usage(void){
     exit(EXIT_FAILURE);
 }
 
+// Check config file permissions and warn if too permissive
+static void checkConfigPermissions(const char* config_path) {
+    struct stat st;
+    
+    if (stat(config_path, &st) == 0) {
+        mode_t perms = st.st_mode & 0777;
+        
+        // Warn if readable by group or others (not just owner)
+        if (perms & (S_IRWXG | S_IRWXO)) {
+            fprintf(stderr, "\n⚠️  SECURITY WARNING: Config file has overly permissive access rights!\n");
+            fprintf(stderr, "    File: %s\n", config_path);
+            fprintf(stderr, "    Current permissions: %03o\n", perms);
+            fprintf(stderr, "    The config file contains plaintext passwords.\n");
+            fprintf(stderr, "    Recommended: chmod 600 %s\n", config_path);
+            fprintf(stderr, "    (Only owner should read/write)\n\n");
+        }
+    }
+}
+
+// Try to load value from environment variable, return NULL if not set
+static const char* getEnvOrNull(const char* var_name) {
+    const char* value = getenv(var_name);
+    if (value && strlen(value) > 0) {
+        DEBUG("Using environment variable %s\n", var_name);
+        return value;
+    }
+    return NULL;
+}
+
 // Sichere String-Kopie mit Längenvalidierung
 // Gibt true bei Erfolg zurück, false bei Fehler
 static bool safe_string_copy(char* dest, size_t dest_size, const char* src, const char* field_name) {
@@ -1999,6 +2029,9 @@ static bool safe_string_copy(char* dest, size_t dest_size, const char* src, cons
 void readConfig(void){
 
     FILE *fp;
+    
+    // Check file permissions before reading
+    checkConfigPermissions(g_ctx.configPath);
 
     fp = fopen(g_ctx.configPath, "r");
 
@@ -2053,6 +2086,24 @@ void readConfig(void){
                 }
             }
 
+        // Environment variables can override config values (safer for credentials)
+        const char* env_user = getEnvOrNull("E3DC_USER");
+        const char* env_password = getEnvOrNull("E3DC_PASSWORD");
+        const char* env_aes = getEnvOrNull("E3DC_AES_PASSWORD");
+        
+        if (env_user) {
+            if (!safe_string_copy(e3dc_config.e3dc_user, sizeof(e3dc_config.e3dc_user), env_user, "E3DC_USER (env)"))
+                exit(EXIT_FAILURE);
+        }
+        if (env_password) {
+            if (!safe_string_copy(e3dc_config.e3dc_password, sizeof(e3dc_config.e3dc_password), env_password, "E3DC_PASSWORD (env)"))
+                exit(EXIT_FAILURE);
+        }
+        if (env_aes) {
+            if (!safe_string_copy(e3dc_config.aes_password, sizeof(e3dc_config.aes_password), env_aes, "E3DC_AES_PASSWORD (env)"))
+                exit(EXIT_FAILURE);
+        }
+
         DEBUG(" \n");
         DEBUG("----------------------------------------------------------\n");
         DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", g_ctx.configPath);
@@ -2076,6 +2127,7 @@ void readConfig(void){
     }
 
 }
+
 
 void checkArguments(void){
 

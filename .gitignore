@@ -19,3 +19,6 @@ replit.md
 
 # Test files
 test_*.config
+
+# Test binaries
+tests/test_*

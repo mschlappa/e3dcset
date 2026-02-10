@@ -340,6 +340,30 @@ time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
             exit(EXIT_FAILURE);
         }
         
+        // Validate date bounds BEFORE mktime() which normalizes invalid dates
+        if (year < 1970 || year > 2100) {
+            fprintf(stderr, "Fehler: Jahr muss zwischen 1970 und 2100 liegen (gelesen: %d)\n", year);
+            fprintf(stderr, "Hinweis: Verwenden Sie ein gültiges Jahr im Format YYYY-MM-DD\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        if (month < 1 || month > 12) {
+            fprintf(stderr, "Fehler: Monat muss zwischen 1 und 12 liegen (gelesen: %d)\n", month);
+            fprintf(stderr, "Hinweis: Verwenden Sie ein gültiges Datum im Format YYYY-MM-DD\n");
+            exit(EXIT_FAILURE);
+        }
+        
+        // Check day bounds using existing getDaysInMonth() function
+        int maxDay = getDaysInMonth(month, year);
+        if (day < 1 || day > maxDay) {
+            fprintf(stderr, "Fehler: Tag muss zwischen 1 und %d liegen für %d-%02d (gelesen: %d)\n",
+                    maxDay, year, month, day);
+            if (month == 2 && day == 29) {
+                fprintf(stderr, "Hinweis: %d ist kein Schaltjahr (Februar hat nur 28 Tage)\n", year);
+            }
+            exit(EXIT_FAILURE);
+        }
+        
         tm_date.tm_year = year - 1900;  // Jahre seit 1900
         tm_date.tm_mon = month - 1;     // Monat 0-11
         tm_date.tm_mday = day;

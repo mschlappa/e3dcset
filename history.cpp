@@ -105,9 +105,25 @@ time_t dateToTimestamp(const char* dateStr, const char* historyType) {
 
 // Format millisecond Unix epoch timestamp to human-readable string
 std::string formatTimestamp(uint64_t milliseconds) {
+    // Validate timestamp range (1970-01-01 to 2100-12-31)
+    // 0ms = 1970-01-01, 4133894400000ms = 2100-12-31 23:59:59
+    const uint64_t MIN_TIMESTAMP_MS = 0;
+    const uint64_t MAX_TIMESTAMP_MS = 4133894400000ULL;
+    
+    if (milliseconds > MAX_TIMESTAMP_MS) {
+        fprintf(stderr, "Warning: Timestamp %llu ms out of valid range (max 2100-12-31), using fallback\n", 
+                (unsigned long long)milliseconds);
+        return "Invalid timestamp";
+    }
+    
     time_t seconds = milliseconds / 1000;
     struct tm timeinfo;
-    localtime_r(&seconds, &timeinfo);
+    
+    if (localtime_r(&seconds, &timeinfo) == NULL) {
+        fprintf(stderr, "Error: Failed to convert timestamp %llu ms to local time\n", 
+                (unsigned long long)milliseconds);
+        return "Invalid timestamp";
+    }
     
     char buffer[64];
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);

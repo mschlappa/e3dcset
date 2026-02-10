@@ -58,6 +58,7 @@ struct CommandContext {
     bool manuelleSpeicherladung;
     bool werteAbfragen;
     bool quietMode;
+    bool jsonOutput;         // True wenn JSON-Ausgabe aktiviert (-j)
     bool listTags;
     int listCategory;
     bool historieAbfrage;
@@ -100,6 +101,7 @@ struct CommandContext {
         manuelleSpeicherladung(false),
         werteAbfragen(false),
         quietMode(false),
+        jsonOutput(false),
         listTags(false),
         listCategory(0),
         historieAbfrage(false),
@@ -211,6 +213,50 @@ struct BatteryModuleData {
 };
 
 static BatteryModuleData g_batteryData;  // Global accumulator for module dump
+
+// JSON Output Helpers (simple printf-based, no external library)
+static bool g_jsonFirstField = true;
+
+void jsonStart() {
+    printf("{\n");
+    g_jsonFirstField = true;
+}
+
+void jsonEnd() {
+    printf("\n}\n");
+    g_jsonFirstField = true;
+}
+
+void jsonField(const char* key, const char* value, bool isString = true) {
+    if (!g_jsonFirstField) {
+        printf(",\n");
+    }
+    g_jsonFirstField = false;
+    
+    if (isString) {
+        // Escape quotes and backslashes in value
+        printf("  \"%s\": \"", key);
+        for (const char* p = value; *p; p++) {
+            if (*p == '"' || *p == '\\') printf("\\");
+            printf("%c", *p);
+        }
+        printf("\"");
+    } else {
+        printf("  \"%s\": %s", key, value);
+    }
+}
+
+void jsonFieldInt(const char* key, int64_t value) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%lld", (long long)value);
+    jsonField(key, buf, false);
+}
+
+void jsonFieldFloat(const char* key, double value) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.2f", value);
+    jsonField(key, buf, false);
+}
 
 // RSCP Error Code Descriptions
 const char* getErrorDescription(uint32_t errorCode) {
@@ -782,7 +828,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_PV: {    // response for TAG_EMS_REQ_POWER_PV
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_PV);
+            jsonField("name", "EMS_POWER_PV");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS PV power is %i W\n", iPower);
@@ -791,7 +844,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_BAT: {    // response for TAG_EMS_REQ_POWER_BAT
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_BAT);
+            jsonField("name", "EMS_POWER_BAT");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS BAT power is %i W\n", iPower);
@@ -800,7 +860,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_HOME: {    // response for TAG_EMS_REQ_POWER_HOME
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_HOME);
+            jsonField("name", "EMS_POWER_HOME");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS house power is %i W\n", iPower);
@@ -809,7 +876,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_GRID: {    // response for TAG_EMS_REQ_POWER_GRID
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_GRID);
+            jsonField("name", "EMS_POWER_GRID");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS grid power is %i W\n", iPower);
@@ -818,7 +892,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_ADD: {    // response for TAG_EMS_REQ_POWER_ADD
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_ADD);
+            jsonField("name", "EMS_POWER_ADD");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS add power meter power is %i W\n", iPower);
@@ -1436,7 +1517,15 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             }
         }
         
-        printf("Zeitraum: %s - %s\n", startStr, endStr);
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonField("type", typeStr);
+            jsonField("start_date", startStr);
+            jsonField("end_date", endStr);
+            jsonField("interval", intervalName);
+        } else {
+            printf("Zeitraum: %s - %s\n", startStr, endStr);
+        }
         
         std::vector<SRscpValue> historyData = protocol->getValueAsContainer(response);
         
@@ -1496,13 +1585,23 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         }
                     }
                     
-                    printf("PV-Produktion:      %.2f kWh\n", dcPower / 1000.0);
-                    printf("Batterie geladen:   %.2f kWh\n", batPowerIn / 1000.0);
-                    printf("Batterie entladen:  %.2f kWh\n", batPowerOut / 1000.0);
-                    printf("Netzbezug:          %.2f kWh\n", gridPowerOut / 1000.0);
-                    printf("Netzeinspeisung:    %.2f kWh\n", gridPowerIn / 1000.0);
-                    printf("Hausverbrauch:      %.2f kWh\n", consumption / 1000.0);
-                    if (autarky > 0) printf("Autarkie:           %.1f %%\n", autarky);
+                    if (g_ctx.jsonOutput) {
+                        jsonFieldFloat("pv_production_kwh", dcPower / 1000.0);
+                        jsonFieldFloat("battery_charge_kwh", batPowerIn / 1000.0);
+                        jsonFieldFloat("battery_discharge_kwh", batPowerOut / 1000.0);
+                        jsonFieldFloat("grid_import_kwh", gridPowerOut / 1000.0);
+                        jsonFieldFloat("grid_export_kwh", gridPowerIn / 1000.0);
+                        jsonFieldFloat("consumption_kwh", consumption / 1000.0);
+                        if (autarky > 0) jsonFieldFloat("autarky_percent", autarky);
+                    } else {
+                        printf("PV-Produktion:      %.2f kWh\n", dcPower / 1000.0);
+                        printf("Batterie geladen:   %.2f kWh\n", batPowerIn / 1000.0);
+                        printf("Batterie entladen:  %.2f kWh\n", batPowerOut / 1000.0);
+                        printf("Netzbezug:          %.2f kWh\n", gridPowerOut / 1000.0);
+                        printf("Netzeinspeisung:    %.2f kWh\n", gridPowerIn / 1000.0);
+                        printf("Hausverbrauch:      %.2f kWh\n", consumption / 1000.0);
+                        if (autarky > 0) printf("Autarkie:           %.1f %%\n", autarky);
+                    }
                     
                     protocol->destroyValueData(sumData);
                     break;
@@ -1520,6 +1619,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         }
         
         protocol->destroyValueData(historyData);
+        
+        if (g_ctx.jsonOutput) {
+            jsonEnd();
+        }
+        
         break;
     }
     
@@ -1527,55 +1631,107 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     default:
         // Generic handler for read requests
         if (g_ctx.werteAbfragen) {
-            if (!g_ctx.quietMode) {
+            if (g_ctx.jsonOutput) {
+                jsonStart();
+                jsonFieldInt("tag", response->tag);
+                
+                // Add tag name if available
+                const char* tagDesc = getTagDescription(response->tag);
+                if (tagDesc) {
+                    jsonField("description", tagDesc);
+                }
+            } else if (!g_ctx.quietMode) {
                 printf("Tag 0x%08X: ", response->tag);
             }
+            
             switch(response->dataType) {
                 case RSCP::eTypeBool: {
                     bool bValue = protocol->getValueAsBool(response);
-                    printFormattedValue(response->tag, bValue ? "true" : "false", bValue ? 1 : 0);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "bool");
+                        jsonField("value", bValue ? "true" : "false", false);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, bValue ? "true" : "false", bValue ? 1 : 0);
+                    }
                     break;
                 }
                 case RSCP::eTypeChar8: {
                     int8_t value = protocol->getValueAsChar8(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "char8");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUChar8: {
                     uint8_t value = protocol->getValueAsUChar8(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uchar8");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt16: {
                     int16_t value = protocol->getValueAsInt16(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "int16");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUInt16: {
                     uint16_t value = protocol->getValueAsUInt16(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uint16");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt32: {
                     int32_t value = protocol->getValueAsInt32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "int32");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUInt32: {
                     uint32_t value = protocol->getValueAsUInt32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uint32");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt64: {
@@ -1612,18 +1768,48 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     float value = protocol->getValueAsFloat32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%.2f", value);
-                    printFormattedValue(response->tag, buf, (int64_t)value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "float32");
+                        jsonFieldFloat("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, (int64_t)value);
+                    }
                     break;
                 }
-                case RSCP::eTypeDouble64:
-                    printf("%.2f\n", protocol->getValueAsDouble64(response));
+                case RSCP::eTypeDouble64: {
+                    double value = protocol->getValueAsDouble64(response);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "double64");
+                        jsonFieldFloat("value", value);
+                        jsonEnd();
+                    } else {
+                        printf("%.2f\n", value);
+                    }
                     break;
-                case RSCP::eTypeBitfield:
-                    printf("0x%08X\n", protocol->getValueAsUInt32(response));
+                }
+                case RSCP::eTypeBitfield: {
+                    uint32_t value = protocol->getValueAsUInt32(response);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "bitfield");
+                        char hexBuf[16];
+                        snprintf(hexBuf, sizeof(hexBuf), "0x%08X", value);
+                        jsonField("value", hexBuf);
+                        jsonEnd();
+                    } else {
+                        printf("0x%08X\n", value);
+                    }
                     break;
+                }
                 case RSCP::eTypeString: {
                     std::string str = protocol->getValueAsString(response);
-                    printf("%s\n", str.c_str());
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "string");
+                        jsonField("value", str.c_str());
+                        jsonEnd();
+                    } else {
+                        printf("%s\n", str.c_str());
+                    }
                     break;
                 }
                 case RSCP::eTypeContainer: {
@@ -2000,10 +2186,10 @@ void printTagList(int category) {
 
 void usage(void){
     fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-E Reserve] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -m <Modul-Index> [-p Pfad zur Konfigurationsdatei]\n");
+    fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q|-j] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
+    fprintf(stderr, "          e3dcset -m <Modul-Index> [-j] [-p Pfad zur Konfigurationsdatei]\n");
     fprintf(stderr, "          e3dcset -l [kategorie]\n");
-    fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
+    fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-j] [-p Pfad zur Konfigurationsdatei]\n\n");
     fprintf(stderr, "   Optionen:\n");
     fprintf(stderr, "     -c  LadeLeistung in Watt setzen\n");
     fprintf(stderr, "     -d  EntladeLeistung in Watt setzen\n");
@@ -2014,6 +2200,7 @@ void usage(void){
     fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
     fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
+    fprintf(stderr, "     -j  JSON Output - strukturierte Ausgabe für Scripting\n");
     fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
     fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
     fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
@@ -2025,13 +2212,16 @@ void usage(void){
     fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
     fprintf(stderr, "     e3dcset -r EMS_POWER_PV         # PV-Leistung abfragen\n");
     fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
+    fprintf(stderr, "     e3dcset -r EMS_POWER_PV -j      # PV-Leistung als JSON\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
     fprintf(stderr, "     e3dcset -m 0                    # Alle Werte von Modul 0\n");
+    fprintf(stderr, "     e3dcset -m 0 -j                 # Alle Werte als JSON\n");
     fprintf(stderr, "     e3dcset -m 1                    # Alle Werte von Modul 1\n");
     fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
     fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
+    fprintf(stderr, "     e3dcset -H day -j               # Tagesdaten als JSON\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
     fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
     fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
@@ -2311,7 +2501,7 @@ int main(int argc, char *argv[])
     
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
+    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:")) != -1) {
 
         switch (opt) {
 
@@ -2387,6 +2577,9 @@ int main(int argc, char *argv[])
                 break;
         case 'q':
                 g_ctx.quietMode = true;
+                break;
+        case 'j':
+                g_ctx.jsonOutput = true;
                 break;
         case 'l':
                 g_ctx.listTags = true;

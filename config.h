@@ -55,6 +55,7 @@ struct CommandContext {
     uint8_t currentDCBIndex;
     uint8_t totalDCBs;
     bool isFirstModuleDumpRequest;
+    uint8_t dcbRequestRetries;  // Track retries without receiving DCB data
     
     // Power and energy settings
     uint32_t ladungsMenge;

@@ -438,6 +438,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 if (dcbCount > 0 && g_ctx.isFirstModuleDumpRequest) {
                     g_ctx.needMoreDCBRequests = true;
                     g_ctx.currentDCBIndex = 0;
+                    g_ctx.dcbRequestRetries = 0;  // Reset retry counter
                     g_ctx.isFirstModuleDumpRequest = false;
                 } else if (dcbCount == 0) {
                     // No DCBs - reset state
@@ -706,13 +707,29 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         
         // CRITICAL: Multi-DCB Loop Management
         // Only increment if we actually received DCB data (not just battery-level response)
-        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump && receivedDCBData) {
-            g_ctx.currentDCBIndex++;
-            
-            // Check if we've queried all DCBs
-            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
-                g_ctx.needMoreDCBRequests = false;
-                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump) {
+            if (receivedDCBData) {
+                // Success - received DCB data, reset retry counter
+                g_ctx.dcbRequestRetries = 0;
+                g_ctx.currentDCBIndex++;
+                
+                // Check if we've queried all DCBs
+                if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                }
+            } else {
+                // No DCB data received - increment retry counter
+                g_ctx.dcbRequestRetries++;
+                
+                // Max 3 retries per DCB index to prevent infinite loops
+                if (g_ctx.dcbRequestRetries >= 3) {
+                    fprintf(stderr, "ERROR: Failed to receive DCB data for index %d after 3 attempts\n",
+                            g_ctx.currentDCBIndex);
+                    fprintf(stderr, "       Aborting DCB requests to prevent infinite loop\n");
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;
+                }
             }
         }
         

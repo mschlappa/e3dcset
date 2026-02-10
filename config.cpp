@@ -34,6 +34,7 @@ CommandContext::CommandContext() :
     currentDCBIndex(0),
     totalDCBs(0),
     isFirstModuleDumpRequest(true),
+    dcbRequestRetries(0),
     ladungsMenge(0),
     ladeLeistung(0),
     entladeLeistung(0),

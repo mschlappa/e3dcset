@@ -14,6 +14,7 @@ Ein leistungsstarkes Linux-Kommandozeilen-Tool zur Steuerung und Überwachung vo
 - Echtzeit-Werte von beliebigen RSCP-Tags abfragen
 - Nach Tag-Name oder Hex-Wert suchen
 - Quiet-Mode für Skriptierung und Automatisierung
+- **NEU:** JSON-Output-Modus (`-j`) für strukturierte Datenverarbeitung
 
 📈 **Historische Datenanalyse**
 - Abfrage aggregierter Energiedaten für Tag/Woche/Monat/Jahr
@@ -36,6 +37,8 @@ git clone https://github.com/mschlappa/e3dcset.git
 cd e3dcset
 ```
 
+**Option 1: Config-Datei** (empfohlen für permanente Installation)
+
 Deine E3DC-System-Zugangsdaten in `e3dcset.config` konfigurieren:
 ```bash
 nano e3dcset.config
@@ -50,6 +53,29 @@ e3dc_password=dein_passwort
 aes_password=dein_rscp_passwort
 debug=0
 ```
+
+**⚠️ Sicherheitshinweis:** Die Config-Datei enthält Klartext-Passwörter!
+```bash
+# Berechtigungen auf nur-Besitzer setzen:
+chmod 600 e3dcset.config
+```
+
+**Option 2: Environment-Variablen** (empfohlen für Docker/CI)
+
+**NEU:** Zugangsdaten können via Environment-Variablen übergeben werden (überschreiben Config-Datei):
+```bash
+export E3DC_USER="deine_email@beispiel.de"
+export E3DC_PASSWORD="dein_passwort"
+export E3DC_AES_PASSWORD="dein_rscp_passwort"
+
+# Jetzt ohne Credentials in Config-Datei nutzbar:
+./e3dcset -r EMS_BAT_SOC
+```
+
+Dies ist sicherer für:
+- Docker-Container
+- CI/CD-Pipelines
+- Systeme mit Secret-Management
 
 Tool kompilieren:
 ```bash
@@ -228,6 +254,20 @@ RSOC=$(./e3dcset -r BAT_REQ_RSOC -q)
 ASOC=$(./e3dcset -r BAT_REQ_ASOC -q)
 ```
 
+**NEU:** Mit JSON-Output abfragen (für strukturierte Datenverarbeitung):
+```bash
+./e3dcset -r EMS_BAT_SOC -j
+# Ausgabe: {"tag":"EMS_BAT_SOC","hex":"0x01000008","value":85,"unit":"%"}
+
+# JSON mit jq parsen:
+POWER=$(./e3dcset -r EMS_POWER_PV -j | jq -r '.value')
+echo "PV-Leistung: ${POWER}W"
+
+# Historische Daten als JSON:
+./e3dcset -H day -j
+# Ausgabe: {"period":{"start":"2026-02-10","end":"2026-02-10"},"data":{"pv_production":4.64,...}}
+```
+
 ### Verfügbare Tags durchsuchen
 
 Alle Tag-Kategorien anzeigen:
@@ -318,6 +358,7 @@ Daten-Abfragen:
   -i <index>    Batterie-Modul Index für BAT_REQ_* Tags (Standard: 0)
   -m <index>    Alle Werte eines Batterie-Moduls anzeigen
   -q            Quiet-Mode - nur Wert ausgeben (für Skriptierung)
+  -j            JSON-Output - strukturierte Ausgabe (kombinierbar mit -r/-m/-H)
   -l [kat]      Tags nach Kategorie auflisten (1-8, kein Argument = Übersicht)
 
 Historische Daten:
@@ -457,21 +498,116 @@ echo "Batterie:"
 - Stelle sicher, dass das Datum im verfügbaren Datenbereich liegt
 - Die meisten Systeme haben Daten von mehreren Wochen/Monaten zurück
 
-## Projektstruktur
+## Build & Development
+
+### Kompilierung
+
+**Einfacher Build:**
+```bash
+make          # Kompiliert e3dcset
+```
+
+**Clean Build:**
+```bash
+make clean    # Entfernt alle Build-Artefakte
+make          # Neu kompilieren
+```
+
+**Mit Tests:**
+```bash
+make test     # Kompiliert und führt alle Tests aus
+```
+
+### Modulare Code-Struktur
+
+**NEU:** Der Code ist modular aufgeteilt für bessere Wartbarkeit:
 
 ```
 e3dcset/
-├── e3dcset.cpp              # Hauptprogramm & CLI
-├── e3dcset.config           # Konfiguration (Zugangsdaten, Limits)
-├── e3dcset.tags             # Tag-Definitionen & Interpretationen
+├── e3dcset.cpp              # Main-Funktion + Argument-Parsing
+├── config.cpp/h             # Config-Parsing, Validierung, Credentials
+├── rscp_handler.cpp/h       # RSCP Request/Response Handling
+├── output.cpp/h             # Output-Formatierung (Text + JSON)
+├── history.cpp/h            # History-Daten & Timestamp-Handling
 ├── RscpProtocol.cpp/.h      # RSCP-Protokoll-Implementierung
-├── SocketConnection.cpp/.h  # Netzwerkkommunikation
+├── SocketConnection.cpp/.h  # Netzwerkkommunikation mit Timeouts
 ├── AES.cpp/.h               # AES-256-Verschlüsselung
 ├── RscpTags.h               # Protokoll-Tag-Konstanten
 ├── RscpTypes.h              # Protokoll-Datentyp-Definitionen
-├── Makefile                 # Build-Konfiguration
+├── Makefile                 # Build mit Auto-Dependency-Tracking
+├── tests/                   # Unit-Tests (C)
+│   ├── test_config.c
+│   ├── test_safe_string.c
+│   └── test_validation.c
 └── README.md                # Diese Datei
 ```
+
+### Automatisches Dependency-Tracking
+
+**NEU:** Das Makefile nutzt automatische Dependency-Generierung:
+- Änderungen an Header-Files triggern automatisch Rebuild der betroffenen Dateien
+- Kein manuelles `make clean` mehr nötig nach Header-Änderungen
+- `.d` Files werden automatisch während Kompilierung generiert
+
+### Tests
+
+Das Projekt enthält Unit-Tests für kritische Funktionen:
+
+```bash
+make test     # Alle Tests ausführen
+```
+
+**Getestete Module:**
+- Config-Parsing (Integer, String, Validierung)
+- String-Handling (safe_string_copy, Bounds-Checking)
+- Input-Validation (Datum, Leistung, Ladungsmenge)
+
+**Test-Output:**
+```
+=========================================
+Running e3dcset Test Suite
+=========================================
+
+=== Testing Config Parsing ===
+  Running: config_parse_integer... PASS
+  ...
+  Total:  9 | Passed: 9 | Failed: 0
+
+All tests passed! ✓
+```
+
+### Verbesserte Fehlerbehandlung
+
+**NEU:** Robuste Error-Handling-Features:
+
+1. **Config-Validierung:**
+   - Prüft Pflichtfelder (server_ip, credentials) nach dem Laden
+   - Klare Fehlermeldungen bei fehlenden Werten
+   - Hinweise auf Environment-Variablen
+
+2. **Null-Pointer-Checks:**
+   - Safe-Strdup mit Allocation-Check
+   - LocalTime_r Null-Check bei Timestamp-Konvertierung
+   - Clear Error-Messages bei Fehlern
+
+3. **DCB-Loop-Protection:**
+   - Max 3 Retries bei fehlenden DCB-Daten
+   - Verhindert Endlosschleifen bei Kommunikationsproblemen
+   - Graceful Exit mit Fehlermeldung
+
+4. **Socket-Timeouts:**
+   - 10s Receive-Timeout (erhöht von 3s)
+   - Verhindert unbegrenztes Blockieren
+   - Besser für History-Queries mit großen Datenmengen
+
+5. **Timestamp-Validierung:**
+   - Range-Check (1970-2100) für Timestamps
+   - Fallback bei ungültigen Werten
+   - Warnung bei Out-of-Range-Daten
+
+## Projektstruktur
+
+Siehe [Build & Development](#build--development) für Details zur modularen Code-Struktur.
 
 ## Technische Details
 
@@ -521,6 +657,16 @@ Bei Fragen oder Problemen:
 
 ---
 
-**Version**: 2.1  
-**Zuletzt aktualisiert**: 28.12.2025  
+**Version**: 2.2  
+**Zuletzt aktualisiert**: 10.02.2026  
 **Betreut**: Community-gesteuert
+
+**Changelog v2.2:**
+- ✅ Environment-Variablen-Support für Credentials
+- ✅ JSON-Output-Modus (`-j`)
+- ✅ Modulare Code-Struktur (config, rscp_handler, output, history)
+- ✅ Automatisches Dependency-Tracking im Build-System
+- ✅ Unit-Tests für Config-Parsing und Validierung
+- ✅ Verbesserte Fehlerbehandlung (Config-Validierung, Null-Checks, DCB-Retry-Limit)
+- ✅ Socket-Timeout erhöht (10s) für stabilere History-Queries
+- ✅ Timestamp-Validierung für History-Daten

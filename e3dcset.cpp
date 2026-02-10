@@ -212,6 +212,30 @@ struct BatteryModuleData {
 
 static BatteryModuleData g_batteryData;  // Global accumulator for module dump
 
+// RSCP Error Code Descriptions
+const char* getErrorDescription(uint32_t errorCode) {
+    switch(errorCode) {
+        case RSCP_ERR_NOT_HANDLED:
+            return "Not handled - Request cannot be processed";
+        case RSCP_ERR_ACCESS_DENIED:
+            return "Access denied - Insufficient permissions";
+        case RSCP_ERR_FORMAT:
+            return "Format error - Invalid request format";
+        case RSCP_ERR_AGAIN:
+            return "Try again - Resource temporarily unavailable";
+        case RSCP_ERR_OUT_OF_BOUNDS:
+            return "Out of bounds - Value outside valid range";
+        case RSCP_ERR_NOT_AVAILABLE:
+            return "Not available - Requested data/feature not available";
+        case RSCP_ERR_UNKNOWN_TAG:
+            return "Unknown tag - Tag not supported by device";
+        case RSCP_ERR_ALREADY_IN_USE:
+            return "Already in use - Resource currently occupied";
+        default:
+            return "Unknown error";
+    }
+}
+
 // Forward declarations for helper functions
 int sendRequestAndReceive(RscpProtocol* protocol, SRscpValue& rootValue);
 int buildDCBRequest(RscpProtocol* protocol, SRscpFrameBuffer* frameBuffer, uint16_t batIndex, uint8_t dcbIndex);
@@ -687,7 +711,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     if(response->dataType == RSCP::eTypeError) {
         // handle error for example access denied errors
         uint32_t uiErrorCode = protocol->getValueAsUInt32(response);
-        printf("Tag 0x%08X received error code %u.\n", response->tag, uiErrorCode);
+        const char* errorDesc = getErrorDescription(uiErrorCode);
+        fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                response->tag, uiErrorCode, uiErrorCode, errorDesc);
         return -1;
     }
 
@@ -820,8 +846,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
                 // Always output errors to stderr (quiet-mode contract)
-                fprintf(stderr, "Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        batteryData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                 // Clean up vector elements
                 for(size_t j = 0; j < batteryData.size(); ++j) {
                     protocol->destroyValueData(&batteryData[j]);
@@ -1298,7 +1326,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 if(PMData[i].dataType == RSCP::eTypeError) {
                     // handle error for example access denied errors
                     uint32_t uiErrorCode = protocol->getValueAsUInt32(&PMData[i]);
-                    printf("TAG_EMS_GET_POWER_SETTINGS 0x%08X received error code %u.\n", PMData[i].tag, uiErrorCode);
+                    const char* errorDesc = getErrorDescription(uiErrorCode);
+                    fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                            PMData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                     return -1;
                 }
                 // check each PM sub tag
@@ -1413,7 +1443,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         for(size_t i = 0; i < historyData.size(); ++i) {
             if(historyData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&historyData[i]);
-                printf("Fehler: Tag 0x%08X, Code %u\n", historyData[i].tag, uiErrorCode);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        historyData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                 continue;
             }
             

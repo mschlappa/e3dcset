@@ -4,6 +4,10 @@ CC=gcc
 CFLAGS=-O2 -Wall -Wextra -std=c99
 ROOT_VALUE=e3dcset
 
+# Source files
+SOURCES=e3dcset.cpp config.cpp rscp_handler.cpp output.cpp history.cpp \
+        RscpProtocol.cpp AES.cpp SocketConnection.cpp
+
 # Test files
 TEST_DIR=tests
 TEST_SOURCES=$(wildcard $(TEST_DIR)/test_*.c)
@@ -12,7 +16,7 @@ TEST_BINARIES=$(TEST_SOURCES:.c=)
 all: $(ROOT_VALUE)
 
 $(ROOT_VALUE): clean
-	$(CXX) $(CXXFLAGS) e3dcset.cpp RscpProtocol.cpp AES.cpp SocketConnection.cpp -o $@
+	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@
 
 # Build and run all tests
 test: $(TEST_BINARIES)

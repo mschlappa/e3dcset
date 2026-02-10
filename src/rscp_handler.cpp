@@ -1,5 +1,6 @@
 #include "rscp_handler.h"
 #include "config.h"
+#include "constants.h"
 #include "output.h"
 #include "history.h"
 #include "RscpProtocol.h"
@@ -73,7 +74,7 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
                 
                 // Check if this is a BAT_REQ_* tag (0x0300xxxx range) - needs BAT_REQ_DATA container
-                if ((g_ctx.leseTag & 0xFF000000) == 0x03000000 && (g_ctx.leseTag & 0x00FF0000) == 0x00000000) {
+                if ((g_ctx.leseTag & 0xFF000000) == RSCP_TAG_BAT_REQ_MASK && (g_ctx.leseTag & 0x00FF0000) == RSCP_TAG_BAT_REQ_SECONDARY_MASK) {
                     DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
                     SRscpValue batContainer;
                     protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
@@ -401,7 +402,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         // Calculate expected response tag from request tag (REQUEST 0x03xxxx -> RESPONSE 0x38xxxx)
         uint32_t expectedResponseTag = 0;
         if (g_ctx.batContainerQuery && !g_ctx.modulInfoDump) {
-            expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
+            expectedResponseTag = g_ctx.leseTag | RSCP_TAG_RESPONSE_BIT;  // Set bit 23 for RESPONSE
         }
         
         bool foundRequestedTag = false;
@@ -580,7 +581,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 receivedDCBData = true;  // CRITICAL: Set flag regardless of output mode!
                             } else if (currentDcbIndex >= 0) {
                                 // Check if this is a DCB-related tag
-                                if ((tag & 0xFFF00000) == 0x03800000) {
+                                if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                     dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[j]));
                                 }
                             }
@@ -777,7 +778,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         if (tag == TAG_BAT_DCB_INDEX) {
                             currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
                         } else if (currentDcbIndex >= 0) {
-                            if ((tag & 0xFFF00000) == 0x03800000) {
+                            if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                 dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
                             }
                         }
@@ -832,7 +833,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
                         } else if (currentDcbIndex >= 0) {
                             // Check if this is a DCB-related tag
-                            if ((tag & 0xFFF00000) == 0x03800000) {
+                            if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                 dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
                                 DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
                             }

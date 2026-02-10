@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "constants.h"
 
 // SECURITY WARNING: This struct contains sensitive credentials
 // Never log or print e3dc_user, e3dc_password, or aes_password in plain text
@@ -14,11 +15,11 @@ typedef struct {
     uint32_t MAX_LEISTUNG;
     uint32_t MIN_LADUNGSMENGE;
     uint32_t MAX_LADUNGSMENGE;
-    char         server_ip[20];
+    char         server_ip[CONFIG_FIELD_SIZE_IP];
     uint32_t server_port;
-    char         e3dc_user[128];         // SENSITIVE: Do not log!
-    char         e3dc_password[128];     // SENSITIVE: Do not log!
-    char         aes_password[128];      // SENSITIVE: Do not log!
+    char         e3dc_user[CONFIG_FIELD_SIZE_CREDENTIAL];         // SENSITIVE: Do not log!
+    char         e3dc_password[CONFIG_FIELD_SIZE_CREDENTIAL];     // SENSITIVE: Do not log!
+    char         aes_password[CONFIG_FIELD_SIZE_CREDENTIAL];      // SENSITIVE: Do not log!
     bool         debug;
     uint32_t timeout_seconds;
     uint32_t max_retries;

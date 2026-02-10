@@ -1,4 +1,5 @@
 #include "config.h"
+#include "constants.h"
 #include "rscp_handler.h"
 #include "output.h"
 #include "SocketConnection.h"
@@ -31,7 +32,7 @@ CommandContext::CommandContext() :
     modulInfoDump(false),
     setEPReserve(false),
     watchMode(false),
-    watchInterval(5),
+    watchInterval(DEFAULT_WATCH_INTERVAL_SECONDS),
     needMoreDCBRequests(false),
     currentDCBIndex(0),
     totalDCBs(0),
@@ -115,7 +116,7 @@ void checkConfigPermissions(const char* config_path) {
     struct stat st;
     
     if (stat(config_path, &st) == 0) {
-        mode_t perms = st.st_mode & 0777;
+        mode_t perms = st.st_mode & CONFIG_PERMISSION_MASK;
         
         // Warn if readable by group or others (not just owner)
         if (perms & (S_IRWXG | S_IRWXO)) {
@@ -182,13 +183,15 @@ void readConfig(void){
     FILE *fp;
     
     // Set default values
-    e3dc_config.timeout_seconds = 10;
-    e3dc_config.max_retries = 3;
+    e3dc_config.timeout_seconds = DEFAULT_TIMEOUT_SECONDS;
+    e3dc_config.max_retries = DEFAULT_MAX_RETRIES;
     
     checkConfigPermissions(g_ctx.configPath);
     fp = fopen(g_ctx.configPath, "r");
 
-    char var[128], value[128], line[256];
+    char var[CONFIG_BUFFER_SIZE_VAR];
+    char value[CONFIG_BUFFER_SIZE_VALUE];
+    char line[CONFIG_BUFFER_SIZE_LINE];
 
     if(fp) {
         while (fgets(line, sizeof(line), fp)) {
@@ -386,8 +389,8 @@ void connectToServer(void){
     // create AES key and set AES parameters
     {
         // initialize AES encryptor and decryptor IV
-        memset(ucDecryptionIV, 0xff, AES_BLOCK_SIZE);
-        memset(ucEncryptionIV, 0xff, AES_BLOCK_SIZE);
+        memset(ucDecryptionIV, AES_IV_INIT_VALUE, AES_BLOCK_SIZE);
+        memset(ucEncryptionIV, AES_IV_INIT_VALUE, AES_BLOCK_SIZE);
 
         // limit password length to AES_KEY_SIZE
         int64_t iPasswordLength = strlen(e3dc_config.aes_password);
@@ -396,12 +399,12 @@ void connectToServer(void){
 
         // copy up to 32 bytes of AES key password
         uint8_t ucAesKey[AES_KEY_SIZE];
-        memset(ucAesKey, 0xff, AES_KEY_SIZE);
+        memset(ucAesKey, AES_IV_INIT_VALUE, AES_KEY_SIZE);
         memcpy(ucAesKey, e3dc_config.aes_password, iPasswordLength);
 
         // set encryptor and decryptor parameters
-        aesDecrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
-        aesEncrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
+        aesDecrypter.SetParameters(AES_KEY_SIZE * BITS_PER_BYTE, AES_BLOCK_SIZE * BITS_PER_BYTE);
+        aesEncrypter.SetParameters(AES_KEY_SIZE * BITS_PER_BYTE, AES_BLOCK_SIZE * BITS_PER_BYTE);
         aesDecrypter.StartDecryption(ucAesKey);
         aesEncrypter.StartEncryption(ucAesKey);
     }

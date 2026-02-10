@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <getopt.h>
 #include "config.h"
+#include "constants.h"
 #include "rscp_handler.h"
 #include "output.h"
 #include "SocketConnection.h"
@@ -113,8 +114,9 @@ int main(int argc, char *argv[])
             if (optind < argc && argv[optind][0] >= '0' && argv[optind][0] <= '9') {
                 g_ctx.listCategory = atoi(argv[optind]);
                 optind++;
-                if (g_ctx.listCategory < 1 || g_ctx.listCategory > 8) {
-                    fprintf(stderr, "Fehler: Ungültige Kategorie %d (gültig: 1-8)\n", g_ctx.listCategory);
+                if (g_ctx.listCategory < MIN_TAG_CATEGORY || g_ctx.listCategory > MAX_TAG_CATEGORY) {
+                    fprintf(stderr, "Fehler: Ungültige Kategorie %d (gültig: %d-%d)\n", 
+                            g_ctx.listCategory, MIN_TAG_CATEGORY, MAX_TAG_CATEGORY);
                     fprintf(stderr, "Beispiel: ./e3dcset -l    (Übersicht)\n");
                     fprintf(stderr, "         ./e3dcset -l 1  (EMS Tags)\n\n");
                     usage();
@@ -128,8 +130,9 @@ int main(int argc, char *argv[])
             break;
         case 1: // --interval
             g_ctx.watchInterval = (uint32_t)atoi(optarg);
-            if (g_ctx.watchInterval < 1) {
-                fprintf(stderr, "Fehler: Interval muss mindestens 1 Sekunde sein\n");
+            if (g_ctx.watchInterval < MIN_WATCH_INTERVAL_SECONDS) {
+                fprintf(stderr, "Fehler: Interval muss mindestens %d Sekunde sein\n", 
+                        MIN_WATCH_INTERVAL_SECONDS);
                 exit(EXIT_FAILURE);
             }
             break;

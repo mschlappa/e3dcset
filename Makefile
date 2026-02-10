@@ -4,9 +4,17 @@ CC=gcc
 CFLAGS=-O2 -Wall -Wextra -std=c99
 ROOT_VALUE=e3dcset
 
+# Directory structure
+SRCDIR=src
+INCDIR=include
+
+# Add include directory to compiler flags
+CXXFLAGS+=-I$(INCDIR)
+
 # Source files
-SOURCES=e3dcset.cpp config.cpp rscp_handler.cpp output.cpp history.cpp \
-        RscpProtocol.cpp AES.cpp SocketConnection.cpp
+SOURCES=$(SRCDIR)/e3dcset.cpp $(SRCDIR)/config.cpp $(SRCDIR)/rscp_handler.cpp \
+        $(SRCDIR)/output.cpp $(SRCDIR)/history.cpp $(SRCDIR)/RscpProtocol.cpp \
+        $(SRCDIR)/AES.cpp $(SRCDIR)/SocketConnection.cpp
 
 # Object files and dependency files
 OBJECTS=$(SOURCES:.cpp=.o)
@@ -24,7 +32,7 @@ $(ROOT_VALUE): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $@
 
 # Compile source files to object files
-%.o: %.cpp
+$(SRCDIR)/%.o: $(SRCDIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Include generated dependency files

@@ -37,15 +37,19 @@ int SocketConnect(const char *cpIpAddress, int iPort) {
         return iSocket;
     }
 
-    // 3 secs receive timeout setup
+    // 10 secs receive timeout (increased for history queries with large data)
     struct timeval tv;
-    tv.tv_sec = 3;
+    tv.tv_sec = 10;
     tv.tv_usec = 0;
-    setsockopt(iSocket, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv, sizeof(struct timeval));
+    if (setsockopt(iSocket, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv, sizeof(struct timeval)) < 0) {
+        printf("Warning: Failed to set receive timeout. errno %i\n", errno);
+    }
     // send time out should never occur on normal OS configurations but just in case set the timeout to 5 seconds
     tv.tv_sec = 5;
     tv.tv_usec = 0;
-    setsockopt(iSocket, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *) &tv, sizeof(struct timeval));
+    if (setsockopt(iSocket, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *) &tv, sizeof(struct timeval)) < 0) {
+        printf("Warning: Failed to set send timeout. errno %i\n", errno);
+    }
 
     int enable = 1;
     setsockopt(iSocket, IPPROTO_TCP, TCP_NODELAY, (char *) &enable, sizeof(enable));

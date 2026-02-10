@@ -174,6 +174,10 @@ char* safe_strdup(const char* str, const char* context) {
 void readConfig(void){
     FILE *fp;
     
+    // Set default values
+    e3dc_config.timeout_seconds = 10;
+    e3dc_config.max_retries = 3;
+    
     checkConfigPermissions(g_ctx.configPath);
     fp = fopen(g_ctx.configPath, "r");
 
@@ -199,6 +203,10 @@ void readConfig(void){
                 }
                 else if(strcmp(var, "server_port") == 0)
                     e3dc_config.server_port = atoi(value);
+                else if(strcmp(var, "timeout_seconds") == 0)
+                    e3dc_config.timeout_seconds = atoi(value);
+                else if(strcmp(var, "max_retries") == 0)
+                    e3dc_config.max_retries = atoi(value);
                 else if(strcmp(var, "e3dc_user") == 0) {
                     if (!safe_string_copy(e3dc_config.e3dc_user, sizeof(e3dc_config.e3dc_user), value, "e3dc_user"))
                         exit(EXIT_FAILURE);

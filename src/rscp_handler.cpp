@@ -725,10 +725,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 // No DCB data received - increment retry counter
                 g_ctx.dcbRequestRetries++;
                 
-                // Max 3 retries per DCB index to prevent infinite loops
-                if (g_ctx.dcbRequestRetries >= 3) {
-                    fprintf(stderr, "WARNING: DCB #%d failed after 3 attempts - skipping\n",
-                            g_ctx.currentDCBIndex);
+                // Max retries per DCB index to prevent infinite loops (configurable via max_retries)
+                if (g_ctx.dcbRequestRetries >= e3dc_config.max_retries) {
+                    fprintf(stderr, "WARNING: DCB #%d failed after %u attempts - skipping\n",
+                            g_ctx.currentDCBIndex, e3dc_config.max_retries);
                     g_ctx.dcbRequestRetries = 0;
                     g_ctx.currentDCBIndex++;  // Weiter mit nächstem DCB
                     if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {

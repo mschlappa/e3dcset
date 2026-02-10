@@ -249,6 +249,42 @@ void readConfig(void){
         DEBUG("----------------------------------------------------------\n");
 
         fclose(fp);
+        
+        // Validate required fields after loading
+        bool hasErrors = false;
+        
+        if (strlen(e3dc_config.server_ip) == 0) {
+            fprintf(stderr, "FEHLER: Config-Feld 'server_ip' ist leer\n");
+            hasErrors = true;
+        }
+        
+        if (e3dc_config.server_port == 0) {
+            fprintf(stderr, "FEHLER: Config-Feld 'server_port' ist 0 oder nicht gesetzt\n");
+            hasErrors = true;
+        }
+        
+        if (strlen(e3dc_config.e3dc_user) == 0) {
+            fprintf(stderr, "FEHLER: Config-Feld 'e3dc_user' ist leer\n");
+            fprintf(stderr, "        Verwenden Sie entweder die Config-Datei oder E3DC_USER Environment-Variable\n");
+            hasErrors = true;
+        }
+        
+        if (strlen(e3dc_config.e3dc_password) == 0) {
+            fprintf(stderr, "FEHLER: Config-Feld 'e3dc_password' ist leer\n");
+            fprintf(stderr, "        Verwenden Sie entweder die Config-Datei oder E3DC_PASSWORD Environment-Variable\n");
+            hasErrors = true;
+        }
+        
+        if (strlen(e3dc_config.aes_password) == 0) {
+            fprintf(stderr, "FEHLER: Config-Feld 'aes_password' ist leer\n");
+            fprintf(stderr, "        Verwenden Sie entweder die Config-Datei oder E3DC_AES_PASSWORD Environment-Variable\n");
+            hasErrors = true;
+        }
+        
+        if (hasErrors) {
+            fprintf(stderr, "\nBitte überprüfen Sie die Konfigurationsdatei: %s\n", g_ctx.configPath);
+            exit(EXIT_FAILURE);
+        }
     } else {
         printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",g_ctx.configPath);
         exit(EXIT_FAILURE);

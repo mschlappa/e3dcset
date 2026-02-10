@@ -41,16 +41,16 @@ int main(int argc, char *argv[])
             break;
         case 'p':
             free(g_ctx.configPath);
-            g_ctx.configPath = strdup(optarg);
+            g_ctx.configPath = safe_strdup(optarg, "config path (-p)");
             break;
         case 't':
             free(g_ctx.tagfilePath);
-            g_ctx.tagfilePath = strdup(optarg);
+            g_ctx.tagfilePath = safe_strdup(optarg, "tagfile path (-t)");
             break;
         case 'H':
             g_ctx.historieAbfrage = true;
             free(g_ctx.historieTyp);
-            g_ctx.historieTyp = strdup(optarg);
+            g_ctx.historieTyp = safe_strdup(optarg, "history type (-H)");
             if (strcmp(optarg, "day") != 0 && strcmp(optarg, "week") != 0 &&
                 strcmp(optarg, "month") != 0 && strcmp(optarg, "year") != 0) {
                 fprintf(stderr, "Fehler: Ungültiger History-Typ '%s'\n", optarg);
@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
             break;
         case 'D':
             free(g_ctx.historieDatum);
-            g_ctx.historieDatum = strdup(optarg);
+            g_ctx.historieDatum = safe_strdup(optarg, "history date (-D)");
             break;
         case 'r':
             g_ctx.werteAbfragen = true;
@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
                 }
             } else {
                 free(g_ctx.tagName);
-                g_ctx.tagName = strdup(optarg);
+                g_ctx.tagName = safe_strdup(optarg, "tag name (-r)");
             }
             break;
         case 'i':

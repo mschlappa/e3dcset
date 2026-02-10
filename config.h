@@ -93,6 +93,7 @@ void checkConfigPermissions(const char* config_path);
 const char* getEnvOrNull(const char* var_name);
 bool safe_string_copy(char* dest, size_t dest_size, const char* src, const char* field_name);
 const char* sanitizeCredential(const char* credential);
+char* safe_strdup(const char* str, const char* context);
 void readConfig(void);
 void checkArguments(void);
 void connectToServer(void);

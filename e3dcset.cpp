@@ -1970,6 +1970,23 @@ void usage(void){
     exit(EXIT_FAILURE);
 }
 
+// Sichere String-Kopie mit Längenvalidierung
+// Gibt true bei Erfolg zurück, false bei Fehler
+static bool safe_string_copy(char* dest, size_t dest_size, const char* src, const char* field_name) {
+    size_t src_len = strlen(src);
+    
+    if (src_len >= dest_size) {
+        fprintf(stderr, "FEHLER: Config-Wert für '%s' zu lang (max %zu Zeichen, gelesen: %zu)\n",
+                field_name, dest_size - 1, src_len);
+        fprintf(stderr, "        Bitte Config-Datei überprüfen.\n");
+        return false;
+    }
+    
+    strncpy(dest, src, dest_size - 1);
+    dest[dest_size - 1] = '\0';  // Null-Terminierung sicherstellen
+    return true;
+}
+
 void readConfig(void){
 
     FILE *fp;
@@ -1999,20 +2016,28 @@ void readConfig(void){
                         else if(strcmp(var, "MAX_LADUNGSMENGE") == 0)
                                 e3dc_config.MAX_LADUNGSMENGE = atoi(value);
 
-                        else if(strcmp(var, "server_ip") == 0)
-                                strcpy(e3dc_config.server_ip, value);
+                        else if(strcmp(var, "server_ip") == 0) {
+                                if (!safe_string_copy(e3dc_config.server_ip, sizeof(e3dc_config.server_ip), value, "server_ip"))
+                                        exit(EXIT_FAILURE);
+                        }
 
                         else if(strcmp(var, "server_port") == 0)
                                 e3dc_config.server_port = atoi(value);
 
-                        else if(strcmp(var, "e3dc_user") == 0)
-                                strcpy(e3dc_config.e3dc_user, value);
+                        else if(strcmp(var, "e3dc_user") == 0) {
+                                if (!safe_string_copy(e3dc_config.e3dc_user, sizeof(e3dc_config.e3dc_user), value, "e3dc_user"))
+                                        exit(EXIT_FAILURE);
+                        }
 
-                        else if(strcmp(var, "e3dc_password") == 0)
-                                strcpy(e3dc_config.e3dc_password, value);
+                        else if(strcmp(var, "e3dc_password") == 0) {
+                                if (!safe_string_copy(e3dc_config.e3dc_password, sizeof(e3dc_config.e3dc_password), value, "e3dc_password"))
+                                        exit(EXIT_FAILURE);
+                        }
 
-                        else if(strcmp(var, "aes_password") == 0)
-                                strcpy(e3dc_config.aes_password, value);
+                        else if(strcmp(var, "aes_password") == 0) {
+                                if (!safe_string_copy(e3dc_config.aes_password, sizeof(e3dc_config.aes_password), value, "aes_password"))
+                                        exit(EXIT_FAILURE);
+                        }
 
                         else if(strcmp(var, "debug") == 0)
                                 debug = atoi(value);

@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 #include <resolv.h>
+#include "config.h"
 
 /*
  * This is a very simple example client socket connection.
@@ -37,15 +38,15 @@ int SocketConnect(const char *cpIpAddress, int iPort) {
         return iSocket;
     }
 
-    // 10 secs receive timeout (increased for history queries with large data)
+    // Receive timeout (configurable via timeout_seconds, default 10)
     struct timeval tv;
-    tv.tv_sec = 10;
+    tv.tv_sec = e3dc_config.timeout_seconds;
     tv.tv_usec = 0;
     if (setsockopt(iSocket, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv, sizeof(struct timeval)) < 0) {
         printf("Warning: Failed to set receive timeout. errno %i\n", errno);
     }
-    // send time out should never occur on normal OS configurations but just in case set the timeout to 5 seconds
-    tv.tv_sec = 5;
+    // send time out should never occur on normal OS configurations but just in case set the timeout to half of receive timeout
+    tv.tv_sec = e3dc_config.timeout_seconds / 2;
     tv.tv_usec = 0;
     if (setsockopt(iSocket, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *) &tv, sizeof(struct timeval)) < 0) {
         printf("Warning: Failed to set send timeout. errno %i\n", errno);

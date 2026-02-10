@@ -20,6 +20,8 @@ typedef struct {
     char         e3dc_password[128];     // SENSITIVE: Do not log!
     char         aes_password[128];      // SENSITIVE: Do not log!
     bool         debug;
+    uint32_t timeout_seconds;
+    uint32_t max_retries;
 } e3dc_config_t;
 
 // History defaults

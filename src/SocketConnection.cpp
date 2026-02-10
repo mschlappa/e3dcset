@@ -10,6 +10,7 @@
 #include <netinet/tcp.h>
 #include <resolv.h>
 #include "config.h"
+#include "constants.h"
 
 /*
  * This is a very simple example client socket connection.
@@ -46,7 +47,7 @@ int SocketConnect(const char *cpIpAddress, int iPort) {
         printf("Warning: Failed to set receive timeout. errno %i\n", errno);
     }
     // send time out should never occur on normal OS configurations but just in case set the timeout to half of receive timeout
-    tv.tv_sec = e3dc_config.timeout_seconds / 2;
+    tv.tv_sec = e3dc_config.timeout_seconds / SOCKET_SEND_TIMEOUT_DIVISOR;
     tv.tv_usec = 0;
     if (setsockopt(iSocket, SOL_SOCKET, SO_SNDTIMEO, (struct timeval *) &tv, sizeof(struct timeval)) < 0) {
         printf("Warning: Failed to set send timeout. errno %i\n", errno);
@@ -56,8 +57,8 @@ int SocketConnect(const char *cpIpAddress, int iPort) {
     setsockopt(iSocket, IPPROTO_TCP, TCP_NODELAY, (char *) &enable, sizeof(enable));
 
 
-    // wait 3 seconds for connection to get ready
-    int iRetries = 3;
+    // NOTE: iRetries variable defined but not currently used in connection logic
+    int iRetries = SOCKET_CONNECT_RETRIES;
     if(connect(iSocket, (struct sockaddr *) &server_addr, sizeof(struct sockaddr)) < 0) {
         printf("Cannot connect to server. errno %i.\n", errno);
         close(iSocket);

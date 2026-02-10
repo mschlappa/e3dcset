@@ -30,6 +30,9 @@
 #define HISTORY_INTERVAL_YEAR     604800  // 1 week
 #define HISTORY_SPAN_YEAR         31536000// 365 days
 
+// SECURITY WARNING: This struct contains sensitive credentials
+// Never log or print e3dc_user, e3dc_password, or aes_password in plain text
+// Always use sanitizeCredential() for any debug/log output
 typedef struct {
 
         uint32_t MIN_LEISTUNG;
@@ -38,9 +41,9 @@ typedef struct {
         uint32_t MAX_LADUNGSMENGE;
     char         server_ip[20];
     uint32_t server_port;
-    char         e3dc_user[128];
-    char         e3dc_password[128];
-    char         aes_password[128];
+    char         e3dc_user[128];         // SENSITIVE: Do not log!
+    char         e3dc_password[128];     // SENSITIVE: Do not log!
+    char         aes_password[128];      // SENSITIVE: Do not log!
     bool         debug;
 
 } e3dc_config_t;
@@ -2026,6 +2029,12 @@ static bool safe_string_copy(char* dest, size_t dest_size, const char* src, cons
     return true;
 }
 
+// Sanitize sensitive string for safe logging
+// Returns masked string if non-empty, empty string otherwise
+static const char* sanitizeCredential(const char* credential) {
+    return (credential && strlen(credential) > 0) ? "********" : "";
+}
+
 void readConfig(void){
 
     FILE *fp;
@@ -2113,9 +2122,10 @@ void readConfig(void){
         DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
         DEBUG("server_ip=%s\n",e3dc_config.server_ip);
         DEBUG("server_port=%i\n",e3dc_config.server_port);
+        // SECURITY: Never log actual credentials - always use sanitizeCredential()
         DEBUG("e3dc_user=%s\n", strlen(e3dc_config.e3dc_user) > 0 ? "***@***" : "");
-        DEBUG("e3dc_password=%s\n", strlen(e3dc_config.e3dc_password) > 0 ? "********" : "");
-        DEBUG("aes_password=%s\n", strlen(e3dc_config.aes_password) > 0 ? "********" : "");
+        DEBUG("e3dc_password=%s\n", sanitizeCredential(e3dc_config.e3dc_password));
+        DEBUG("aes_password=%s\n", sanitizeCredential(e3dc_config.aes_password));
         DEBUG("----------------------------------------------------------\n");
 
         fclose(fp);

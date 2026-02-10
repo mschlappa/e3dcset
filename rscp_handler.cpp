@@ -11,6 +11,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <cmath>
 
 // RSCP connection state
 int iSocket = -1;

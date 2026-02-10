@@ -43,8 +43,8 @@ CommandContext::CommandContext() :
     historieInterval(HISTORY_INTERVAL_DAY),
     historieSpan(HISTORY_SPAN_DAY),
     historieStartTime(0),
-    configPath(strdup("e3dcset.config")),
-    tagfilePath(strdup("e3dcset.tags")),
+    configPath(safe_strdup("e3dcset.config", "CommandContext constructor")),
+    tagfilePath(safe_strdup("e3dcset.tags", "CommandContext constructor")),
     tagName(NULL),
     historieDatum(NULL),
     historieTyp(NULL)
@@ -150,6 +150,24 @@ bool safe_string_copy(char* dest, size_t dest_size, const char* src, const char*
 // Sanitize sensitive string for safe logging
 const char* sanitizeCredential(const char* credential) {
     return (credential && strlen(credential) > 0) ? "********" : "";
+}
+
+// Safe strdup with null-pointer check
+char* safe_strdup(const char* str, const char* context) {
+    if (str == NULL) {
+        fprintf(stderr, "FEHLER: Versuch NULL-String zu duplizieren (%s)\n", 
+                context ? context : "unbekannter Kontext");
+        exit(EXIT_FAILURE);
+    }
+    
+    char* result = strdup(str);
+    if (result == NULL) {
+        fprintf(stderr, "FEHLER: Speicher-Allokation fehlgeschlagen für '%s' (%s)\n",
+                str, context ? context : "unbekannter Kontext");
+        exit(EXIT_FAILURE);
+    }
+    
+    return result;
 }
 
 void readConfig(void){
@@ -273,7 +291,7 @@ void checkArguments(void){
     }
     
     if (g_ctx.historieAbfrage && !g_ctx.historieDatum){
-        g_ctx.historieDatum = strdup("today");
+        g_ctx.historieDatum = safe_strdup("today", "default history date");
     }
 
     if (g_ctx.ladeLeistungGesetzt && (g_ctx.ladeLeistung < 0 || g_ctx.ladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.ladeLeistung > e3dc_config.MAX_LEISTUNG)){

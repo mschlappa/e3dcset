@@ -30,6 +30,8 @@ CommandContext::CommandContext() :
     batContainerQuery(false),
     modulInfoDump(false),
     setEPReserve(false),
+    watchMode(false),
+    watchInterval(5),
     needMoreDCBRequests(false),
     currentDCBIndex(0),
     totalDCBs(0),
@@ -79,7 +81,9 @@ void usage(void){
     fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
     fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
     fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
-    fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
+    fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n");
+    fprintf(stderr, "     -w, --watch      Continuous Monitoring Modus (Strg+C zum Beenden)\n");
+    fprintf(stderr, "     --interval <N>   Abfrageintervall in Sekunden (Standard: 5)\n\n");
     fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e, -E oder -a kombiniert werden\n\n");
     fprintf(stderr, "   Beispiele:\n");
     fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
@@ -99,7 +103,10 @@ void usage(void){
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
     fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
     fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
-    fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n\n");
+    fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n");
+    fprintf(stderr, "     e3dcset -r EMS_POWER_PV -w      # PV-Leistung alle 5s (Ctrl+C zum Beenden)\n");
+    fprintf(stderr, "     e3dcset -r EMS_POWER_PV -w --interval 10  # PV-Leistung alle 10s\n");
+    fprintf(stderr, "     e3dcset -r EMS_POWER_PV -w -j   # Watch-Mode mit JSON-Stream\n\n");
     exit(EXIT_FAILURE);
 }
 

@@ -51,6 +51,8 @@ struct CommandContext {
     bool batContainerQuery;
     bool modulInfoDump;
     bool setEPReserve;
+    bool watchMode;
+    uint32_t watchInterval;
     
     // Multi-DCB support
     bool needMoreDCBRequests;
@@ -90,6 +92,10 @@ struct CommandContext {
 extern e3dc_config_t e3dc_config;
 extern bool debug;
 extern CommandContext g_ctx;
+
+// Watch mode interruption flag (defined in e3dcset.cpp)
+#include <signal.h>
+extern volatile sig_atomic_t g_watchInterrupted;
 
 // Configuration functions
 void checkConfigPermissions(const char* config_path);

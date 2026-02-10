@@ -1,5 +1,5 @@
 CXX=g++
-CXXFLAGS=-O3
+CXXFLAGS=-O3 -MMD -MP
 CC=gcc
 CFLAGS=-O2 -Wall -Wextra -std=c99
 ROOT_VALUE=e3dcset
@@ -8,6 +8,10 @@ ROOT_VALUE=e3dcset
 SOURCES=e3dcset.cpp config.cpp rscp_handler.cpp output.cpp history.cpp \
         RscpProtocol.cpp AES.cpp SocketConnection.cpp
 
+# Object files and dependency files
+OBJECTS=$(SOURCES:.cpp=.o)
+DEPS=$(SOURCES:.cpp=.d)
+
 # Test files
 TEST_DIR=tests
 TEST_SOURCES=$(wildcard $(TEST_DIR)/test_*.c)
@@ -15,8 +19,16 @@ TEST_BINARIES=$(TEST_SOURCES:.c=)
 
 all: $(ROOT_VALUE)
 
-$(ROOT_VALUE): clean
-	$(CXX) $(CXXFLAGS) $(SOURCES) -o $@
+# Link object files
+$(ROOT_VALUE): $(OBJECTS)
+	$(CXX) $(CXXFLAGS) $(OBJECTS) -o $@
+
+# Compile source files to object files
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# Include generated dependency files
+-include $(DEPS)
 
 # Build and run all tests
 test: $(TEST_BINARIES)
@@ -35,4 +47,4 @@ $(TEST_DIR)/test_%: $(TEST_DIR)/test_%.c $(TEST_DIR)/test_framework.h
 	$(CC) $(CFLAGS) -I$(TEST_DIR) $< -o $@
 
 clean:
-	-rm -f $(ROOT_VALUE) $(VECTOR) $(TEST_BINARIES)
+	-rm -f $(ROOT_VALUE) $(VECTOR) $(TEST_BINARIES) $(OBJECTS) $(DEPS)

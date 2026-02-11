@@ -53,6 +53,7 @@ struct CommandContext {
     bool batContainerQuery;
     bool modulInfoDump;
     bool setEPReserve;
+    bool sysInfoAbfrage;
     bool watchMode;
     uint32_t watchInterval;
     

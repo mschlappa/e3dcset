@@ -157,6 +157,13 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 protocol.destroyValueData(historyContainer);
         }
 
+        if (g_ctx.sysInfoAbfrage){
+                DEBUG("Anfrage System-Info Tags\n");
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_SERIAL_NUMBER);
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_PRODUCTION_DATE);
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_SW_RELEASE);
+        }
+
         if (g_ctx.manuelleSpeicherladung){
                 DEBUG("Sende TAG_EMS_REQ_START_MANUAL_CHARGE (0x%08X) mit Ladungsmenge: %u Wh\n", 
                       TAG_EMS_REQ_START_MANUAL_CHARGE, g_ctx.ladungsMenge);
@@ -1185,6 +1192,41 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         break;
     }
     
+    // System-Info response tags
+    case TAG_INFO_SERIAL_NUMBER: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("serial_number", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Seriennummer:      %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+    case TAG_INFO_PRODUCTION_DATE: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("production_date", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Produktionsdatum:  %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+    case TAG_INFO_SW_RELEASE: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("sw_release", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Software Version:  %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+
     // ...
     default:
         // Generic handler for read requests
@@ -1454,9 +1496,19 @@ static int processReceiveBuffer(const unsigned char * ucBuffer, int iLength)
 
     int iProcessedBytes = iResult;
 
+    // JSON wrapping for --info (all system info in one JSON object)
+    if (g_ctx.sysInfoAbfrage && g_ctx.jsonOutput) {
+        jsonStart();
+    }
+
     // process each SRscpValue struct seperately
     for(size_t i = 0; i < frame.data.size(); i++) {
         handleResponseValue(&protocol, &frame.data[i]);
+    }
+
+    // Close JSON object for --info
+    if (g_ctx.sysInfoAbfrage && g_ctx.jsonOutput) {
+        jsonEnd();
     }
 
     // destroy frame data and free memory

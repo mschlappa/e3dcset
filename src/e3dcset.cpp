@@ -32,6 +32,7 @@ int main(int argc, char *argv[])
         {"watch", no_argument, 0, 'w'},
         {"interval", required_argument, 0, 1},
         {"raw", no_argument, 0, 2},
+        {"info", no_argument, 0, 3},
         {0, 0, 0, 0}
     };
 
@@ -139,6 +140,9 @@ int main(int argc, char *argv[])
             break;
         case 2: // --raw
             g_ctx.rawOutput = true;
+            break;
+        case 3: // --info
+            g_ctx.sysInfoAbfrage = true;
             break;
         default:
             usage();

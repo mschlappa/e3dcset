@@ -20,10 +20,14 @@ SOURCES=$(SRCDIR)/e3dcset.cpp $(SRCDIR)/config.cpp $(SRCDIR)/rscp_handler.cpp \
 OBJECTS=$(SOURCES:.cpp=.o)
 DEPS=$(SOURCES:.cpp=.d)
 
-# Test files
+# C test files
 TEST_DIR=tests
 TEST_SOURCES=$(wildcard $(TEST_DIR)/test_*.c)
 TEST_BINARIES=$(TEST_SOURCES:.c=)
+
+# C++ test files (Catch2)
+CXX_TEST_SOURCES=$(TEST_DIR)/test_main.cpp $(TEST_DIR)/test_constants.cpp $(TEST_DIR)/test_helpers.cpp
+CXX_TEST_BINARY=$(TEST_DIR)/run_tests
 
 all: $(ROOT_VALUE)
 
@@ -39,20 +43,30 @@ $(SRCDIR)/%.o: $(SRCDIR)/%.cpp
 -include $(DEPS)
 
 # Build and run all tests
-test: $(TEST_BINARIES)
+test: $(TEST_BINARIES) $(CXX_TEST_BINARY)
 	@echo "========================================="
 	@echo "Running e3dcset Test Suite"
 	@echo "========================================="
 	@for test in $(TEST_BINARIES); do \
 		$$test || exit 1; \
 	done
+	@echo "--- C++ Unit Tests (Catch2) ---"
+	./$(CXX_TEST_BINARY)
+	@echo "--- CLI Validation Tests ---"
+	@cd $(TEST_DIR) && ./test_cli_validation.sh
 	@echo "========================================="
 	@echo "All tests passed!"
 	@echo "========================================="
 
-# Build individual test binaries
+# Build individual C test binaries
 $(TEST_DIR)/test_%: $(TEST_DIR)/test_%.c $(TEST_DIR)/test_framework.h
 	$(CC) $(CFLAGS) -I$(TEST_DIR) $< -o $@
 
+# Build C++ test binary (Catch2)
+$(CXX_TEST_BINARY): $(CXX_TEST_SOURCES)
+	$(CXX) -Wall -std=c++11 -I$(TEST_DIR) -I$(INCDIR) -o $@ $(CXX_TEST_SOURCES)
+
 clean:
-	-rm -f $(ROOT_VALUE) $(VECTOR) $(TEST_BINARIES) $(OBJECTS) $(DEPS)
+	-rm -f $(ROOT_VALUE) $(VECTOR) $(TEST_BINARIES) $(CXX_TEST_BINARY) $(OBJECTS) $(DEPS)
+
+.PHONY: all test clean

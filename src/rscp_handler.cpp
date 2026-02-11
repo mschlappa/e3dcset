@@ -1032,6 +1032,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             jsonField("start_date", startStr);
             jsonField("end_date", endStr);
             jsonField("interval", intervalName);
+        } else if (g_ctx.rawOutput) {
+            // Raw mode: no "Zeitraum:" output (CSV header comes with SUM_CONTAINER)
         } else {
             printf("Zeitraum: %s - %s\n", startStr, endStr);
         }
@@ -1124,12 +1126,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         
                         float vBatIn = 0, vBatOut = 0, vDcPower = 0;
                         float vGridIn = 0, vGridOut = 0, vConsumption = 0;
-                        uint64_t vTimestamp = 0;
+                        uint32_t vGraphIndex = 0;
                         
                         for(size_t j = 0; j < valData.size(); ++j) {
                             switch(valData[j].tag) {
                                 case TAG_DB_GRAPH_INDEX:
-                                    vTimestamp = (uint64_t)protocol->getValueAsUInt32(&valData[j]);
+                                    vGraphIndex = protocol->getValueAsUInt32(&valData[j]);
                                     break;
                                 case TAG_DB_BAT_POWER_IN:
                                     vBatIn = protocol->getValueAsFloat32(&valData[j]);
@@ -1154,8 +1156,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             }
                         }
                         
+                        uint64_t vTimestamp = (uint64_t)g_ctx.historieStartTime + (uint64_t)vGraphIndex * g_ctx.historieInterval;
                         printf("%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
-                               (unsigned long long)(g_ctx.historieStartTime + vTimestamp),
+                               (unsigned long long)vTimestamp,
                                vDcPower, vBatIn, vBatOut, vGridIn, vGridOut, vConsumption);
                         
                         protocol->destroyValueData(valData);

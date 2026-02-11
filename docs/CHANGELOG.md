@@ -8,6 +8,19 @@ Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 
 ## [Unreleased]
 
+### Neue Features
+- **`--raw` Flag** (PR #51) – CSV-Ausgabe der History-Einzelwerte (nur mit `-H`)
+- **`--info` Flag** (PR #52) – System-Informationen abfragen (SW-Version, Seriennummer, Produktionsdatum)
+- **`-b <index>` Flag** (PR #58, #60) – Device-Index für BAT- und PVI-Container-Tags
+- **`-h` / `--help` Flag** (PR #56) – Hilfe-Ausgabe mit Optionsübersicht
+
+### Verbesserungen
+- **NDJSON-Output** (PR #54) – `-j` gibt jetzt NDJSON aus (ein JSON-Objekt pro Zeile), auch für `--info` und `-m`
+- **BAT-Container-Wrap** (PR #58) – BAT-Tags werden automatisch in `BAT_REQ_DATA` Container verpackt
+- **PVI-Container-Wrap** (PR #60) – PVI-Tags werden automatisch in `PVI_REQ_DATA` Container verpackt
+- **`-m -j` valides JSON** (PR #62) – Modul-Info-Dump mit `-j` erzeugt jetzt valides JSON
+- **CLI-Validierung** (PR #56) – Prüfung auf ungültige Argument-Kombinationen (`--raw` ohne `-H`, `-w` ohne `-r`, `--raw`+`--info`, Datumsvalidierung)
+
 ### Dokumentation
 - **Neue Dokumentationsstruktur:**
   - Kompakte README.md (1-Seiten-Übersicht)
@@ -160,11 +173,11 @@ Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/).
 - Automatisches `BAT_REQ_DATA` Container-Handling
 
 #### Multi-Batterie-Support
-- **`-i <index>` Flag** zum Auswählen von Batterie-Modulen
-- Unterstützt Systeme mit mehreren Batterie-Modulen
+- **`-b <index>` Flag** zum Auswählen von Batterie-/PVI-Modulen (ehemals `-i`)
+- Unterstützt Systeme mit mehreren Batterie-Modulen und PV-Wechselrichtern
 - **Beispiel:**
   ```bash
-  ./e3dcset -r BAT_REQ_RSOC -i 1  # Zweites Modul
+  ./e3dcset -r BAT_REQ_RSOC -b 1  # Zweites Modul
   ```
 
 #### Modul-Info Dump

@@ -50,13 +50,31 @@ make
 ### JSON-Output für Automatisierung
 
 ```bash
-# Strukturierte Daten ausgeben
+# Strukturierte Daten ausgeben (NDJSON – ein JSON-Objekt pro Zeile)
 ./e3dcset -r EMS_BAT_SOC -j
 # Output: {"tag":"EMS_BAT_SOC","hex":"0x01000008","value":85,"unit":"%"}
+
+# System-Informationen als JSON
+./e3dcset --info -j
 
 # Mit jq verarbeiten
 POWER=$(./e3dcset -r EMS_POWER_PV -j | jq -r '.value')
 echo "PV-Leistung: ${POWER}W"
+```
+
+### System-Informationen
+
+```bash
+# SW-Version, Seriennummer, Produktionsdatum
+./e3dcset --info
+```
+
+### History-Rohdaten (CSV)
+
+```bash
+# 15-Minuten-Einzelwerte als CSV
+./e3dcset -H day --raw
+./e3dcset -H day -D 2024-11-20 --raw
 ```
 
 ---
@@ -84,10 +102,11 @@ Leistungssteuerung:
 
 Datenabfragen:
   -r <tag>      RSCP-Tag abfragen (Name oder Hex)
-  -i <index>    Batterie-Modul Index (Standard: 0)
+  -b <index>    Device-Index für BAT/PVI Container-Tags (Standard: 0)
   -m <index>    Alle Werte eines Batterie-Moduls inkl. DCBs
   -q            Quiet-Mode (nur Wert ausgeben)
-  -j            JSON-Output
+  -j            JSON/NDJSON-Output
+  --info        System-Informationen (SW-Version, Seriennummer, Produktionsdatum)
   -l [kat]      Tags auflisten (1-8)
   -w            Watch-Mode (kontinuierliche Überwachung)
   --interval    Watch-Intervall in Sekunden (Standard: 5)
@@ -95,8 +114,10 @@ Datenabfragen:
 Historische Daten:
   -H <typ>      History abfragen (day|week|month|year)
   -D <datum>    Datum angeben (YYYY-MM-DD, Standard: today)
+  --raw         CSV-Ausgabe der History-Einzelwerte (nur mit -H)
 
-Konfiguration:
+Allgemein:
+  -h, --help    Hilfe anzeigen
   -p <pfad>     Config-Pfad (Standard: e3dcset.config)
   -t <pfad>     Tags-Pfad (Standard: e3dcset.tags)
 ```

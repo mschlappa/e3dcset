@@ -9,6 +9,7 @@ Komplette Anleitung zur Nutzung von `e3dcset` mit allen Flags, Optionen und Beis
 - [Grundlegende Syntax](#grundlegende-syntax)
 - [Leistungssteuerung](#leistungssteuerung)
 - [Datenabfragen](#datenabfragen)
+- [System-Informationen](#system-informationen)
 - [Historische Daten](#historische-daten)
 - [Watch-Mode](#watch-mode)
 - [Tag-Management](#tag-management)
@@ -28,8 +29,11 @@ e3dcset [OPTIONEN]
 - `-r` (Abfrage) kann **nicht** mit Steuerungsbefehlen (`-c`, `-d`, `-e`, `-E`, `-a`) kombiniert werden
 - `-H` (Historie) kann **nicht** mit anderen Aktionen kombiniert werden
 - `-q` (Quiet) funktioniert nur mit `-r`
-- `-j` (JSON) funktioniert mit `-r`, `-m`, `-H`
+- `-j` (JSON/NDJSON) funktioniert mit `-r`, `-m`, `-H`, `--info`
 - `-D` (Datum) funktioniert nur mit `-H`
+- `--raw` (CSV) funktioniert nur mit `-H`
+- `--raw` und `--info` können nicht kombiniert werden
+- `-w` (Watch) benötigt `-r`
 
 ---
 
@@ -203,13 +207,15 @@ Beispiel: `0x01000008` ✅ (REQUEST), `0x01800008` ❌ (RESPONSE)
 
 ---
 
-### Multi-Batterie-Systeme (`-i`)
+### Device-Index (`-b`)
 
 ```bash
-e3dcset -r <tag> -i <index>
+e3dcset -r <tag> -b <index>
 ```
 
-Bei Systemen mit mehreren Batterie-Modulen kann mit `-i` das Modul ausgewählt werden.
+Setzt den Device-Index für BAT- und PVI-Container-Tags. Bei Systemen mit mehreren Batterie-Modulen oder PV-Wechselrichtern wird damit das Gerät ausgewählt.
+
+**Container-Automatik:** BAT-Tags (z.B. `BAT_REQ_RSOC`) und PVI-Tags (z.B. `PVI_REQ_AC_POWER`) werden automatisch in den passenden Container (`BAT_REQ_DATA` bzw. `PVI_REQ_DATA`) verpackt – mit dem über `-b` gesetzten Index.
 
 **Beispiele:**
 ```bash
@@ -217,14 +223,14 @@ Bei Systemen mit mehreren Batterie-Modulen kann mit `-i` das Modul ausgewählt w
 ./e3dcset -r BAT_REQ_RSOC
 
 # Zweites Modul (Index 1)
-./e3dcset -r BAT_REQ_RSOC -i 1
+./e3dcset -r BAT_REQ_RSOC -b 1
 
-# Drittes Modul (Index 2)
-./e3dcset -r BAT_REQ_ASOC -i 2
+# PV-Wechselrichter Index 1
+./e3dcset -r PVI_REQ_AC_POWER -b 1
 
 # Alle Module in Script abfragen
 for i in 0 1 2; do
-  echo "Modul $i SOH: $(./e3dcset -r BAT_REQ_ASOC -i $i -q)%"
+  echo "Modul $i SOH: $(./e3dcset -r BAT_REQ_ASOC -b $i -q)%"
 done
 ```
 
@@ -280,6 +286,32 @@ Batterie Modul 0:
 - Überwachung einzelner Zellblöcke
 - Erkennung degradierter DCB-Module
 - Präzise Batterie-Zustandsüberwachung
+
+---
+
+## System-Informationen
+
+### System-Info abfragen (`--info`)
+
+```bash
+e3dcset --info
+```
+
+Zeigt System-Informationen des E3DC-Hauskraftwerks an:
+- Software-Version
+- Seriennummer
+- Produktionsdatum
+
+**Beispiele:**
+```bash
+# System-Info anzeigen
+./e3dcset --info
+
+# Als JSON
+./e3dcset --info -j
+```
+
+**Hinweis:** `--info` kann nicht mit `--raw` oder `-r` kombiniert werden.
 
 ---
 
@@ -354,6 +386,35 @@ Fragt historische Daten für ein bestimmtes Datum ab.
 # Heute (explizit)
 ./e3dcset -H day -D today
 ```
+
+---
+
+### Rohdaten-Ausgabe (`--raw`)
+
+```bash
+e3dcset -H <typ> --raw
+```
+
+Gibt die einzelnen History-Datenpunkte als CSV aus (statt nur der Zusammenfassung). Nur in Kombination mit `-H` nutzbar.
+
+**Beispiele:**
+```bash
+# Heutige 15-Minuten-Werte als CSV
+./e3dcset -H day --raw
+
+# Bestimmter Tag
+./e3dcset -H day -D 2024-11-20 --raw
+
+# Wochenwerte (1-Stunden-Intervalle)
+./e3dcset -H week --raw
+```
+
+**CSV-Format:**
+```
+Zeitstempel;PV;Batterie_Laden;Batterie_Entladen;Netzbezug;Einspeisung;Hausverbrauch
+```
+
+**Hinweis:** `--raw` kann nicht mit `--info` kombiniert werden.
 
 ---
 
@@ -505,9 +566,9 @@ echo "Batterie: ${SOC}%"
 
 ---
 
-### JSON-Output (`-j`)
+### JSON/NDJSON-Output (`-j`)
 
-Gibt strukturierte JSON-Daten aus. Kombinierbar mit `-r`, `-m`, `-H`.
+Gibt strukturierte Daten im NDJSON-Format aus (ein JSON-Objekt pro Zeile). Kombinierbar mit `-r`, `-m`, `-H`, `--info`.
 
 **Abfrage:**
 ```bash
@@ -515,7 +576,7 @@ Gibt strukturierte JSON-Daten aus. Kombinierbar mit `-r`, `-m`, `-H`.
 ```
 
 **Ausgabe:**
-```json
+```
 {"tag":"EMS_BAT_SOC","hex":"0x01000008","value":85,"unit":"%"}
 ```
 
@@ -524,25 +585,18 @@ Gibt strukturierte JSON-Daten aus. Kombinierbar mit `-r`, `-m`, `-H`.
 ./e3dcset -H day -j
 ```
 
-**Ausgabe:**
-```json
-{
-  "period": {
-    "start": "2026-02-10",
-    "end": "2026-02-10"
-  },
-  "data": {
-    "pv_production": 15.76,
-    "battery_charge": 8.24,
-    "battery_discharge": 6.12,
-    "grid_import": 3.45,
-    "grid_export": 2.18,
-    "home_consumption": 17.23,
-    "autarky": 79.8,
-    "self_consumption": 86.2
-  },
-  "unit": "kWh"
-}
+**Ausgabe:** Ein JSON-Objekt pro Zeile (NDJSON) mit den aggregierten Daten.
+
+**Modul-Dump:**
+```bash
+./e3dcset -m 0 -j
+```
+
+**Ausgabe:** Valides JSON mit allen Modul- und DCB-Daten.
+
+**System-Info:**
+```bash
+./e3dcset --info -j
 ```
 
 **Mit jq verarbeiten:**
@@ -615,6 +669,30 @@ while read line; do
   echo "{\"timestamp\":$timestamp,$line:1:-1}}"
 done >> ~/logs/pv-power.jsonl
 ```
+
+---
+
+## Hilfe
+
+### Hilfe anzeigen (`-h`, `--help`)
+
+```bash
+e3dcset -h
+e3dcset --help
+```
+
+Zeigt eine Übersicht aller verfügbaren Optionen mit Kurzbeschreibung an.
+
+---
+
+### CLI-Validierung
+
+Das Tool prüft beim Start auf ungültige Argument-Kombinationen und gibt eine klare Fehlermeldung aus:
+
+- `--raw` ohne `-H` → Fehler (Rohdaten nur für History)
+- `-w` ohne `-r` → Fehler (Watch braucht einen Tag)
+- `--raw` + `--info` → Fehler (nicht kombinierbar)
+- `-D` mit ungültigem Format → Fehler (erwartet YYYY-MM-DD oder 'today')
 
 ---
 

@@ -116,6 +116,34 @@ void usage(void){
     exit(EXIT_FAILURE);
 }
 
+void usageHelp(void){
+    fprintf(stdout, "\n");
+    fprintf(stdout, "   e3dcset - Ein Tool zum Steuern und Abfragen des E3/DC Hauskraftwerks\n\n");
+    fprintf(stdout, "   Verwendung:   e3dcset [Optionen]\n\n");
+    fprintf(stdout, "   Optionen:\n");
+    fprintf(stdout, "     -h, --help  Diese Hilfe anzeigen\n");
+    fprintf(stdout, "     -c  Lade-Leistung setzen (0 = keine Ladung, >0 = Watt)\n");
+    fprintf(stdout, "     -d  Entlade-Leistung setzen (0 = keine Entladung, >0 = Watt)\n");
+    fprintf(stdout, "     -a  Lade/Entlade-Leistung Automatik (setzt beide auf 0)\n");
+    fprintf(stdout, "     -e  Manuelle Speicherladung (Wh)\n");
+    fprintf(stdout, "     -E  Notstromreserve setzen (Wh, 0 = deaktiviert)\n");
+    fprintf(stdout, "     -r  Bestimmten Tag abfragen (Hex-Wert oder Name, z.B. EMS_POWER_PV)\n");
+    fprintf(stdout, "     --info  System-Info abfragen (SW-Version, Seriennummer, Produktionsdatum)\n");
+    fprintf(stdout, "     --raw   Rohdaten ausgeben (nur mit -H)\n");
+    fprintf(stdout, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
+    fprintf(stdout, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
+    fprintf(stdout, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
+    fprintf(stdout, "     -j  JSON Output - strukturierte Ausgabe für Scripting\n");
+    fprintf(stdout, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
+    fprintf(stdout, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
+    fprintf(stdout, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
+    fprintf(stdout, "     -H  Historische Daten abfragen (day/week/month/year)\n");
+    fprintf(stdout, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n");
+    fprintf(stdout, "     -w, --watch      Continuous Monitoring Modus (Strg+C zum Beenden)\n");
+    fprintf(stdout, "     --interval <N>   Abfrageintervall in Sekunden (Standard: 5)\n\n");
+    exit(EXIT_SUCCESS);
+}
+
 // Check config file permissions and warn if too permissive
 void checkConfigPermissions(const char* config_path) {
     struct stat st;
@@ -314,7 +342,7 @@ void readConfig(void){
     }
 }
 
-void checkArguments(void){
+void checkArgumentsEarly(void){
     if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
         fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
         exit(EXIT_FAILURE);
@@ -340,6 +368,21 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
     
+    if (g_ctx.rawOutput && !g_ctx.historieAbfrage){
+        fprintf(stderr, "--raw kann nur zusammen mit -H verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (g_ctx.watchMode && !g_ctx.werteAbfragen){
+        fprintf(stderr, "-w/--watch kann nur zusammen mit -r verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (g_ctx.rawOutput && g_ctx.sysInfoAbfrage){
+        fprintf(stderr, "--raw kann nicht zusammen mit --info verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+
     if (g_ctx.historieDatum && !g_ctx.historieAbfrage){
         fprintf(stderr, "[-D] kann nur zusammen mit [-H] verwendet werden\n\n");
         exit(EXIT_FAILURE);
@@ -354,6 +397,40 @@ void checkArguments(void){
         g_ctx.historieDatum = safe_strdup("today", "default history date");
     }
 
+    // Datum validieren (YYYY-MM-DD Format + gültige Werte)
+    if (g_ctx.historieDatum && strcmp(g_ctx.historieDatum, "today") != 0) {
+        int year, month, day;
+        if (strlen(g_ctx.historieDatum) != 10 ||
+            sscanf(g_ctx.historieDatum, "%4d-%2d-%2d", &year, &month, &day) != 3 ||
+            g_ctx.historieDatum[4] != '-' || g_ctx.historieDatum[7] != '-') {
+            fprintf(stderr, "Fehler: Ungültiges Datumsformat '%s' (erwartet: YYYY-MM-DD)\n\n", g_ctx.historieDatum);
+            exit(EXIT_FAILURE);
+        }
+        if (month < 1 || month > 12) {
+            fprintf(stderr, "Fehler: Ungültiger Monat %d in '%s' (gültig: 1-12)\n\n", month, g_ctx.historieDatum);
+            exit(EXIT_FAILURE);
+        }
+        int daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))
+            daysInMonth[1] = 29;
+        if (day < 1 || day > daysInMonth[month - 1]) {
+            fprintf(stderr, "Fehler: Ungültiger Tag %d für Monat %d in '%s'\n\n", day, month, g_ctx.historieDatum);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (g_ctx.sysInfoAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
+        fprintf(stderr, "[--info] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve && !g_ctx.sysInfoAbfrage){
+        fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+void checkArguments(void){
     if (g_ctx.ladeLeistungGesetzt && (g_ctx.ladeLeistung < 0 || g_ctx.ladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.ladeLeistung > e3dc_config.MAX_LEISTUNG)){
         fprintf(stderr, "[-c g_ctx.ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
         exit(EXIT_FAILURE);
@@ -374,15 +451,6 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
 
-    if (g_ctx.sysInfoAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
-        fprintf(stderr, "[--info] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve && !g_ctx.sysInfoAbfrage){
-        fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
-        exit(EXIT_FAILURE);
-    }
 }
 
 void connectToServer(void){

@@ -28,6 +28,7 @@ CommandContext::CommandContext() :
     listTags(false),
     listCategory(0),
     historieAbfrage(false),
+    rawOutput(false),
     batContainerQuery(false),
     modulInfoDump(false),
     setEPReserve(false),

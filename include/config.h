@@ -49,6 +49,7 @@ struct CommandContext {
     bool listTags;
     int listCategory;
     bool historieAbfrage;
+    bool rawOutput;
     bool batContainerQuery;
     bool modulInfoDump;
     bool setEPReserve;

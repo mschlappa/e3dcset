@@ -1094,7 +1094,10 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         }
                     }
                     
-                    if (g_ctx.jsonOutput) {
+                    if (g_ctx.rawOutput) {
+                        // In raw mode, only print CSV header from sum container
+                        printf("timestamp,pv_wh,bat_in_wh,bat_out_wh,grid_in_wh,grid_out_wh,consumption_wh\n");
+                    } else if (g_ctx.jsonOutput) {
                         jsonFieldFloat("pv_production_kwh", dcPower / 1000.0);
                         jsonFieldFloat("battery_charge_kwh", batPowerIn / 1000.0);
                         jsonFieldFloat("battery_discharge_kwh", batPowerOut / 1000.0);
@@ -1116,9 +1119,51 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     break;
                 }
                 case TAG_DB_VALUE_CONTAINER: {
-                    // Datenpunkte werden nicht angezeigt - nur Zusammenfassung
-                    std::vector<SRscpValue> tmpData = protocol->getValueAsContainer(&historyData[i]);
-                    protocol->destroyValueData(tmpData);
+                    if (g_ctx.rawOutput) {
+                        std::vector<SRscpValue> valData = protocol->getValueAsContainer(&historyData[i]);
+                        
+                        float vBatIn = 0, vBatOut = 0, vDcPower = 0;
+                        float vGridIn = 0, vGridOut = 0, vConsumption = 0;
+                        uint64_t vTimestamp = 0;
+                        
+                        for(size_t j = 0; j < valData.size(); ++j) {
+                            switch(valData[j].tag) {
+                                case TAG_DB_GRAPH_INDEX:
+                                    vTimestamp = (uint64_t)protocol->getValueAsUInt32(&valData[j]);
+                                    break;
+                                case TAG_DB_BAT_POWER_IN:
+                                    vBatIn = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_BAT_POWER_OUT:
+                                    vBatOut = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_DC_POWER:
+                                    vDcPower = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_GRID_POWER_IN:
+                                    vGridIn = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_GRID_POWER_OUT:
+                                    vGridOut = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_CONSUMPTION:
+                                    vConsumption = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                        
+                        printf("%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
+                               (unsigned long long)(g_ctx.historieStartTime + vTimestamp),
+                               vDcPower, vBatIn, vBatOut, vGridIn, vGridOut, vConsumption);
+                        
+                        protocol->destroyValueData(valData);
+                    } else {
+                        // Without --raw: skip individual data points, only show summary
+                        std::vector<SRscpValue> tmpData = protocol->getValueAsContainer(&historyData[i]);
+                        protocol->destroyValueData(tmpData);
+                    }
                     break;
                 }
                 default:

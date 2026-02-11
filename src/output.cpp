@@ -29,31 +29,31 @@ const CategoryDescriptor categoryDescriptors[] = {
 const int NUM_CATEGORIES = sizeof(categoryDescriptors) / sizeof(categoryDescriptors[0]);
 
 void jsonStart() {
-    printf("{\n");
+    printf("{");
     g_jsonFirstField = true;
 }
 
 void jsonEnd() {
-    printf("\n}\n");
+    printf("}\n");
     g_jsonFirstField = true;
 }
 
 void jsonField(const char* key, const char* value, bool isString) {
     if (!g_jsonFirstField) {
-        printf(",\n");
+        printf(",");
     }
     g_jsonFirstField = false;
     
     if (isString) {
         // Escape quotes and backslashes in value
-        printf("  \"%s\": \"", key);
+        printf("\"%s\":\"", key);
         for (const char* p = value; *p; p++) {
             if (*p == '"' || *p == '\\') printf("\\");
             printf("%c", *p);
         }
         printf("\"");
     } else {
-        printf("  \"%s\": %s", key, value);
+        printf("\"%s\":%s", key, value);
     }
 }
 

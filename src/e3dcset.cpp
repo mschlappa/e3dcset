@@ -33,10 +33,11 @@ int main(int argc, char *argv[])
         {"interval", required_argument, 0, 1},
         {"raw", no_argument, 0, 2},
         {"info", no_argument, 0, 3},
+        {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:w", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:wh", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'c':
             g_ctx.leistungAendern = true;
@@ -144,6 +145,9 @@ int main(int argc, char *argv[])
         case 3: // --info
             g_ctx.sysInfoAbfrage = true;
             break;
+        case 'h':
+            usageHelp();
+            break;
         default:
             usage();
         }
@@ -175,10 +179,13 @@ int main(int argc, char *argv[])
         g_ctx.tagName = NULL;
     }
 
+    // Frühe Argument-Validierung (VOR readConfig, da kein Config nötig)
+    checkArgumentsEarly();
+
     // Lese Konfigurationsdatei
     readConfig();
 
-    // Argumente der Kommandozeile plausibilisieren
+    // Weitere Plausibilisierung (braucht Config-Werte)
     checkArguments();
 
     // Register signal handler for watch mode (Ctrl+C)

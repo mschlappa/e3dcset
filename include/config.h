@@ -107,8 +107,10 @@ bool safe_string_copy(char* dest, size_t dest_size, const char* src, const char*
 const char* sanitizeCredential(const char* credential);
 char* safe_strdup(const char* str, const char* context);
 void readConfig(void);
+void checkArgumentsEarly(void);
 void checkArguments(void);
 void connectToServer(void);
 void usage(void);
+void usageHelp(void);
 
 #endif // CONFIG_H

@@ -70,6 +70,7 @@ struct CommandContext {
     uint32_t entladeLeistung;
     uint32_t leseTag;
     uint16_t batIndex;
+    bool batIndexExplicit;
     float epReserveWh;
     
     // History query parameters

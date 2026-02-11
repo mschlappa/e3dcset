@@ -45,6 +45,7 @@ CommandContext::CommandContext() :
     entladeLeistung(0),
     leseTag(0),
     batIndex(0),
+    batIndexExplicit(false),
     epReserveWh(0.0f),
     historieInterval(HISTORY_INTERVAL_DAY),
     historieSpan(HISTORY_SPAN_DAY),
@@ -77,7 +78,7 @@ void usage(void){
     fprintf(stderr, "     -E  Notstromreserve setzen (Wh, 0 = deaktiviert)\n");
     fprintf(stderr, "     -r  Bestimmten Tag abfragen (Hex-Wert oder Name, z.B. EMS_POWER_PV)\n");
     fprintf(stderr, "     --info  System-Info abfragen (SW-Version, Seriennummer, Produktionsdatum)\n");
-    fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
+    fprintf(stderr, "     -b  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
     fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
     fprintf(stderr, "     -j  JSON Output - strukturierte Ausgabe für Scripting\n");
@@ -96,8 +97,8 @@ void usage(void){
     fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
     fprintf(stderr, "     e3dcset -r EMS_POWER_PV -j      # PV-Leistung als JSON\n");
     fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
-    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
-    fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -b 1    # Batterie-SOC Modul 1\n");
+    fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -b 0 -q # SOH Modul 0 (quiet)\n");
     fprintf(stderr, "     e3dcset -m 0                    # Alle Werte von Modul 0\n");
     fprintf(stderr, "     e3dcset -m 0 -j                 # Alle Werte als JSON\n");
     fprintf(stderr, "     e3dcset -m 1                    # Alle Werte von Modul 1\n");
@@ -130,7 +131,7 @@ void usageHelp(void){
     fprintf(stdout, "     -r  Bestimmten Tag abfragen (Hex-Wert oder Name, z.B. EMS_POWER_PV)\n");
     fprintf(stdout, "     --info  System-Info abfragen (SW-Version, Seriennummer, Produktionsdatum)\n");
     fprintf(stdout, "     --raw   Rohdaten ausgeben (nur mit -H)\n");
-    fprintf(stdout, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
+    fprintf(stdout, "     -b  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
     fprintf(stdout, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stdout, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
     fprintf(stdout, "     -j  JSON Output - strukturierte Ausgabe für Scripting\n");
@@ -449,6 +450,17 @@ void checkArguments(void){
     if (g_ctx.manuelleSpeicherladung && (g_ctx.ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || g_ctx.ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
         fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
         exit(EXIT_FAILURE);
+    }
+
+    // -b without -r or -m is an error
+    if (g_ctx.batIndexExplicit && !g_ctx.werteAbfragen && !g_ctx.modulInfoDump){
+        fprintf(stderr, "Fehler: -b erfordert -r (Tag-Abfrage) oder -m (Modul-Dump)\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // -b with -m: warning (both set battery index, -m takes precedence)
+    if (g_ctx.batIndexExplicit && g_ctx.modulInfoDump){
+        fprintf(stderr, "Hinweis: -b wird bei -m ignoriert (Modul-Dump verwendet eigenen Index)\n");
     }
 
 }

@@ -73,8 +73,9 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         if (g_ctx.werteAbfragen){
                 DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
                 
-                // Check if this is a BAT_REQ_* tag (0x0300xxxx range) - needs BAT_REQ_DATA container
-                if ((g_ctx.leseTag & 0xFF000000) == RSCP_TAG_BAT_REQ_MASK && (g_ctx.leseTag & 0x00FF0000) == RSCP_TAG_BAT_REQ_SECONDARY_MASK) {
+                // Check if this is a BAT tag (0x03xxxxxx) but NOT a container tag (0x0304xxxx)
+                if ((g_ctx.leseTag & RSCP_TAG_BAT_NAMESPACE_MASK) == RSCP_TAG_BAT_NAMESPACE &&
+                    (g_ctx.leseTag & RSCP_TAG_BAT_CONTAINER_MASK) != RSCP_TAG_BAT_CONTAINER_PREFIX) {
                     DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
                     SRscpValue batContainer;
                     protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);

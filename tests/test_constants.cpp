@@ -97,3 +97,37 @@ TEST_CASE("Interval/span ratios are reasonable for E3DC queries", "[constants]")
         REQUIRE(points <= 55);
     }
 }
+
+// Helper function to check if a tag needs BAT_REQ_DATA container wrapping
+static bool isBatContainerRequired(uint32_t tag) {
+    return (tag & RSCP_TAG_BAT_NAMESPACE_MASK) == RSCP_TAG_BAT_NAMESPACE &&
+           (tag & RSCP_TAG_BAT_CONTAINER_MASK) != RSCP_TAG_BAT_CONTAINER_PREFIX;
+}
+
+TEST_CASE("BAT namespace detection", "[bat-container]") {
+    SECTION("BAT_REQ tags need container wrapping") {
+        REQUIRE(isBatContainerRequired(0x03000001) == true);  // BAT_REQ_RSOC
+        REQUIRE(isBatContainerRequired(0x0300000F) == true);  // BAT_REQ_ASOC
+        REQUIRE(isBatContainerRequired(0x03000008) == true);  // BAT_REQ_CHARGE_CYCLES
+        REQUIRE(isBatContainerRequired(0x03000002) == true);  // BAT_REQ_MODULE_VOLTAGE
+        REQUIRE(isBatContainerRequired(0x03000003) == true);  // BAT_REQ_CURRENT
+    }
+
+    SECTION("BAT container tags must NOT be wrapped") {
+        REQUIRE(isBatContainerRequired(0x03040000) == false);  // BAT_REQ_DATA
+        REQUIRE(isBatContainerRequired(0x03040001) == false);  // BAT_INDEX
+    }
+
+    SECTION("EMS tags must NOT be wrapped") {
+        REQUIRE(isBatContainerRequired(0x01000001) == false);  // EMS tag
+        REQUIRE(isBatContainerRequired(0x01000008) == false);  // EMS_REQ_POWER_PV
+        REQUIRE(isBatContainerRequired(0x01000009) == false);  // EMS_REQ_POWER_BAT
+    }
+
+    SECTION("Other namespaces must NOT be wrapped") {
+        REQUIRE(isBatContainerRequired(0x02000001) == false);  // PVI namespace
+        REQUIRE(isBatContainerRequired(0x06000001) == false);  // DB namespace
+        REQUIRE(isBatContainerRequired(0x00000001) == false);  // RSCP namespace
+        REQUIRE(isBatContainerRequired(0x0A000001) == false);  // INFO namespace
+    }
+}

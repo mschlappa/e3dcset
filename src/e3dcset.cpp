@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
         {0, 0, 0, 0}
     };
 
-    while ((opt = getopt_long(argc, argv, "c:d:e:E:ap:r:i:m:qjlt:H:D:I:S:wh", long_options, &option_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "c:d:e:E:ap:r:b:m:qjlt:H:D:I:S:wh", long_options, &option_index)) != -1) {
         switch (opt) {
         case 'c':
             g_ctx.leistungAendern = true;
@@ -99,8 +99,9 @@ int main(int argc, char *argv[])
                 g_ctx.tagName = safe_strdup(optarg, "tag name (-r)");
             }
             break;
-        case 'i':
+        case 'b':
             g_ctx.batIndex = (uint16_t)atoi(optarg);
+            g_ctx.batIndexExplicit = true;
             break;
         case 'm':
             g_ctx.modulInfoDump = true;

@@ -1,377 +1,52 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <unistd.h>
-#include <strings.h>
-#include <time.h>
-#include <cmath>
-#include <map>
-#include <string>
-#include <vector>
+#include "rscp_handler.h"
+#include "config.h"
+#include "constants.h"
+#include "output.h"
+#include "history.h"
 #include "RscpProtocol.h"
 #include "RscpTags.h"
 #include "SocketConnection.h"
 #include "AES.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <cmath>
+#include <time.h>
 
-#define DEBUG(...)if(debug) {printf(__VA_ARGS__);}
+// RSCP connection state
+int iSocket = -1;
+int iAuthenticated = 0;
+AES aesEncrypter;
+AES aesDecrypter;
+uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
+uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
 
-#define AES_KEY_SIZE    32
-#define AES_BLOCK_SIZE  32
-
-// Default values for history queries (required by E3DC device)
-// Intervals and spans are optimized per history type
-#define HISTORY_INTERVAL_DAY      900     // 15 minutes
-#define HISTORY_SPAN_DAY          86400   // 24 hours
-#define HISTORY_INTERVAL_WEEK     3600    // 1 hour
-#define HISTORY_SPAN_WEEK         604800  // 7 days
-#define HISTORY_INTERVAL_MONTH    86400   // 1 day
-#define HISTORY_SPAN_MONTH        2678400 // 31 days
-#define HISTORY_INTERVAL_YEAR     604800  // 1 week
-#define HISTORY_SPAN_YEAR         31536000// 365 days
-
-typedef struct {
-
-        uint32_t MIN_LEISTUNG;
-        uint32_t MAX_LEISTUNG;
-        uint32_t MIN_LADUNGSMENGE;
-        uint32_t MAX_LADUNGSMENGE;
-    char         server_ip[20];
-    uint32_t server_port;
-    char         e3dc_user[128];
-    char         e3dc_password[128];
-    char         aes_password[128];
-    bool         debug;
-
-} e3dc_config_t;
-
-// Command Context - kapselt alle Kommandozeilen-bezogenen Zustände
-struct CommandContext {
-    // Control modes
-    bool leistungAendern;
-    bool automatischLeistungEinstellen;
-    bool ladeLeistungGesetzt;
-    bool entladeLeistungGesetzt;
-    bool manuelleSpeicherladung;
-    bool werteAbfragen;
-    bool quietMode;
-    bool listTags;
-    int listCategory;
-    bool historieAbfrage;
-    bool batContainerQuery;  // True wenn BAT_REQ_* Tag abgefragt wird
-    bool modulInfoDump;      // True wenn alle Modul-Werte abgefragt werden (-m)
-    bool setEPReserve;       // True wenn Notstromreserve gesetzt werden soll (-E)
-    
-    // Multi-DCB support
-    bool needMoreDCBRequests;  // True wenn weitere DCB-Requests nötig sind
-    uint8_t currentDCBIndex;   // Aktueller DCB-Index für Multi-Request
-    uint8_t totalDCBs;         // Gesamtanzahl DCBs (aus DCB_COUNT)
-    bool isFirstModuleDumpRequest;  // True für ersten Request (Battery-Level-Daten)
-    
-    // Power and energy settings
-    uint32_t ladungsMenge;
-    uint32_t ladeLeistung;
-    uint32_t entladeLeistung;
-    uint32_t leseTag;
-    uint16_t batIndex;  // Batterie-Modul Index (0 = erstes Modul)
-    float epReserveWh;  // Notstromreserve in Wh (-E)
-    
-    // History query parameters
-    char *historieDatum;        // Format: "YYYY-MM-DD" or "today"
-    char *historieTyp;          // "day", "week", "month", "year"
-    uint32_t historieInterval;  // Actual interval sent to device
-    uint32_t historieSpan;      // Actual span sent to device
-    time_t historieStartTime;   // Start timestamp for display
-    
-    // Configuration paths
-    char *configPath;
-    char *tagfilePath;
-    char *tagName;  // Speichert Tag-Namen für spätere Konvertierung
-    
-    // Constructor with defaults
-    CommandContext() : 
-        leistungAendern(false),
-        automatischLeistungEinstellen(false),
-        ladeLeistungGesetzt(false),
-        entladeLeistungGesetzt(false),
-        manuelleSpeicherladung(false),
-        werteAbfragen(false),
-        quietMode(false),
-        listTags(false),
-        listCategory(0),
-        historieAbfrage(false),
-        batContainerQuery(false),
-        modulInfoDump(false),
-        setEPReserve(false),
-        needMoreDCBRequests(false),
-        currentDCBIndex(0),
-        totalDCBs(0),
-        isFirstModuleDumpRequest(true),
-        ladungsMenge(0),
-        ladeLeistung(0),
-        entladeLeistung(0),
-        leseTag(0),
-        batIndex(0),
-        epReserveWh(0.0f),
-        historieInterval(HISTORY_INTERVAL_DAY),
-        historieSpan(HISTORY_SPAN_DAY),
-        historieStartTime(0),
-        configPath(strdup("e3dcset.config")),
-        tagfilePath(strdup("e3dcset.tags")),
-        tagName(NULL),
-        historieDatum(NULL),
-        historieTyp(NULL)
-    {}
-};
-
-static int iSocket = -1;
-static int iAuthenticated = 0;
-
-static AES aesEncrypter;
-static AES aesDecrypter;
-
-static uint8_t ucEncryptionIV[AES_BLOCK_SIZE];
-static uint8_t ucDecryptionIV[AES_BLOCK_SIZE];
-
-static e3dc_config_t e3dc_config;
-
-static bool debug = false;
-
-// Globale Command Context Instanz
-static CommandContext g_ctx;
-
-// Tag-Kategorien als Enum statt Magic Numbers
-enum TagCategory {
-    CATEGORY_OVERVIEW = 0,
-    CATEGORY_EMS = 1,
-    CATEGORY_BAT = 2,
-    CATEGORY_PVI = 3,
-    CATEGORY_PM = 4,
-    CATEGORY_WB = 5,
-    CATEGORY_DCDC = 6,
-    CATEGORY_INFO = 7,
-    CATEGORY_DB = 8,
-    CATEGORY_SYS = 9,
-    CATEGORY_MAX = 10  // Für Validierung
-};
-
-// Kategorie-Deskriptoren
-struct CategoryDescriptor {
-    int id;
-    const char* shortName;
-    const char* fullName;
-};
-
-static const CategoryDescriptor categoryDescriptors[] = {
-    {CATEGORY_EMS, "EMS", "Energy Management"},
-    {CATEGORY_BAT, "BAT", "Battery"},
-    {CATEGORY_PVI, "PVI", "PV Inverter"},
-    {CATEGORY_PM, "PM", "Power Meter"},
-    {CATEGORY_WB, "WB", "Wallbox"},
-    {CATEGORY_DCDC, "DCDC", "DC/DC Converter"},
-    {CATEGORY_INFO, "INFO", "System Info"},
-    {CATEGORY_DB, "DB", "Database"},
-    {CATEGORY_SYS, "SYS", "System"}
-};
-static const int NUM_CATEGORIES = sizeof(categoryDescriptors) / sizeof(categoryDescriptors[0]);
-
-// Datenstrukturen für geladene Tags
-struct TagInfo {
-    std::string name;
-    uint32_t hex;
-    std::string description;
-};
-
-std::map<int, std::vector<TagInfo>> loadedTags;  // category -> tags
-std::map<std::string, std::string> loadedInterpretations;  // "hex:value" -> interpretation
-
-// DCB-Daten-Struktur für Multi-Request-Sammlung
-struct DCBData {
-    uint8_t index;
-    std::vector<std::pair<uint32_t, SRscpValue>> tags;  // tag -> value pairs
-};
-
-// Batterie-Modul-Daten-Struktur
-struct BatteryModuleData {
-    std::map<uint32_t, SRscpValue> batteryTags;  // Battery-level tags (SOC, SOH, etc.)
-    std::vector<DCBData> dcbs;  // Per-DCB data
-    uint8_t dcbCount;
-};
-
-static BatteryModuleData g_batteryData;  // Global accumulator for module dump
+const char* getErrorDescription(uint32_t errorCode) {
+    switch(errorCode) {
+        case RSCP_ERR_NOT_HANDLED:
+            return "Not handled - Request cannot be processed";
+        case RSCP_ERR_ACCESS_DENIED:
+            return "Access denied - Insufficient permissions";
+        case RSCP_ERR_FORMAT:
+            return "Format error - Invalid request format";
+        case RSCP_ERR_AGAIN:
+            return "Try again - Resource temporarily unavailable";
+        case RSCP_ERR_OUT_OF_BOUNDS:
+            return "Out of bounds - Value outside valid range";
+        case RSCP_ERR_NOT_AVAILABLE:
+            return "Not available - Requested data/feature not available";
+        case RSCP_ERR_UNKNOWN_TAG:
+            return "Unknown tag - Tag not supported by device";
+        case RSCP_ERR_ALREADY_IN_USE:
+            return "Already in use - Resource currently occupied";
+        default:
+            return "Unknown error";
+    }
+}
 
 // Forward declarations for helper functions
-int sendRequestAndReceive(RscpProtocol* protocol, SRscpValue& rootValue);
-int buildDCBRequest(RscpProtocol* protocol, SRscpFrameBuffer* frameBuffer, uint16_t batIndex, uint8_t dcbIndex);
-
-// Tag-Datei laden
-void loadTagsFile(const char* filename) {
-    FILE* fp = fopen(filename, "r");
-    if (!fp) {
-        fprintf(stderr, "FEHLER: Tag-Datei '%s' nicht gefunden!\n", filename);
-        fprintf(stderr, "Das Tool benötigt die Tag-Definitions-Datei zum Betrieb.\n");
-        fprintf(stderr, "Bitte stellen Sie sicher, dass 'e3dcset.tags' im aktuellen Verzeichnis vorhanden ist,\n");
-        fprintf(stderr, "oder geben Sie den Pfad mit -t an.\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    char line[512];
-    int currentCategory = 0;
-    
-    while (fgets(line, sizeof(line), fp)) {
-        // Kommentare und leere Zeilen überspringen
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
-        
-        // Trim newline
-        line[strcspn(line, "\r\n")] = 0;
-        
-        // Kategorie-Header [EMS], [BAT], etc.
-        if (line[0] == '[') {
-            if (strstr(line, "[EMS]")) currentCategory = 1;
-            else if (strstr(line, "[BAT]")) currentCategory = 2;
-            else if (strstr(line, "[PVI]")) currentCategory = 3;
-            else if (strstr(line, "[PM]")) currentCategory = 4;
-            else if (strstr(line, "[WB]")) currentCategory = 5;
-            else if (strstr(line, "[DCDC]")) currentCategory = 6;
-            else if (strstr(line, "[INFO]")) currentCategory = 7;
-            else if (strstr(line, "[DB]")) currentCategory = 8;
-            else if (strstr(line, "[SYS]")) currentCategory = 9;
-            else if (strstr(line, "[INTERPRETATIONS]")) currentCategory = 100;
-            continue;
-        }
-        
-        if (currentCategory == 100) {
-            // Interpretation: 0x01000009:2 = AC-gekoppelt
-            char hexStr[32], interp[256];
-            if (sscanf(line, "%31[^=] = %255[^\n]", hexStr, interp) == 2) {
-                // Trim whitespace
-                char* h = hexStr; while (*h == ' ') h++;
-                char* hEnd = h + strlen(h) - 1; while (hEnd > h && *hEnd == ' ') *hEnd-- = 0;
-                char* i = interp; while (*i == ' ') i++;
-                char* iEnd = i + strlen(i) - 1; while (iEnd > i && *iEnd == ' ') *iEnd-- = 0;
-                
-                loadedInterpretations[std::string(h)] = std::string(i);
-            }
-        } else if (currentCategory >= 1 && currentCategory <= 9) {
-            // Tag: EMS_POWER_PV = 0x01000001 # PV-Leistung in Watt
-            char tagName[64], hexStr[32], desc[256];
-            char* hashPos = strchr(line, '#');
-            
-            if (hashPos) {
-                *hashPos = '\0';
-                hashPos++;
-                // Trim description
-                while (*hashPos == ' ') hashPos++;
-                strncpy(desc, hashPos, sizeof(desc) - 1);
-                desc[sizeof(desc) - 1] = '\0';
-            } else {
-                desc[0] = '\0';
-            }
-            
-            if (sscanf(line, "%63[^=] = %31s", tagName, hexStr) == 2) {
-                // Trim whitespace from tagName
-                char* t = tagName; while (*t == ' ') t++;
-                char* tEnd = t + strlen(t) - 1; while (tEnd > t && *tEnd == ' ') *tEnd-- = 0;
-                
-                TagInfo info;
-                info.name = std::string(t);
-                info.hex = (uint32_t)strtoul(hexStr, NULL, 16);
-                info.description = std::string(desc);
-                
-                loadedTags[currentCategory].push_back(info);
-            }
-        }
-    }
-    
-    fclose(fp);
-    DEBUG("Tag-Datei '%s' erfolgreich geladen\n", filename);
-}
-
-// Berechnet Tage im Monat (unter Berücksichtigung von Schaltjahren)
-int getDaysInMonth(int month, int year) {
-    // month: 1-12, year: 4-stellige Jahreszahl
-    int daysInMonth[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    
-    if (month < 1 || month > 12) return 31;
-    
-    int days = daysInMonth[month - 1];
-    
-    // Schaltjahr-Check für Februar
-    if (month == 2) {
-        // Schaltjahr: Jahr teilbar durch 4, aber nicht durch 100 (außer teilbar durch 400)
-        if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
-            days = 29;
-        }
-    }
-    
-    return days;
-}
-
-// Konvertiert Datum zu Unix-Timestamp mit History-Typ-Anpassung (Anfang der Periode)
-time_t dateToTimestamp(const char* dateStr, const char* historyType = "day") {
-    struct tm tm_date = {0};
-    time_t now;
-    int year = 0, month = 0;  // Speichern für Monats-Berechnung
-    
-    if (strcmp(dateStr, "today") == 0) {
-        time(&now);
-        struct tm* tm_now = localtime(&now);
-        tm_date = *tm_now;
-        year = tm_now->tm_year + 1900;
-        month = tm_now->tm_mon + 1;
-    } else {
-        // Parse YYYY-MM-DD Format
-        int day;
-        if (sscanf(dateStr, "%d-%d-%d", &year, &month, &day) != 3) {
-            fprintf(stderr, "Fehler: Ungültiges Datumsformat '%s'\n", dateStr);
-            fprintf(stderr, "Verwenden Sie 'today' oder 'YYYY-MM-DD' (z.B. 2024-11-20)\n");
-            exit(EXIT_FAILURE);
-        }
-        
-        tm_date.tm_year = year - 1900;  // Jahre seit 1900
-        tm_date.tm_mon = month - 1;     // Monat 0-11
-        tm_date.tm_mday = day;
-        tm_date.tm_isdst = -1;  // Auto-detect DST
-    }
-    
-    // Setze auf Mitternacht (00:00:00)
-    tm_date.tm_hour = 0;
-    tm_date.tm_min = 0;
-    tm_date.tm_sec = 0;
-    
-    // Anpassung basierend auf History-Typ - BEVOR mktime()
-    if (strcmp(historyType, "week") == 0) {
-        // Berechne tm_wday erst durch mktime()
-        time_t temp = mktime(&tm_date);
-        struct tm* pTemp = localtime(&temp);
-        if (pTemp) {
-            // Gehe zum Montag der aktuellen Woche (tm_wday: 0=Sonntag, 1=Montag)
-            int daysToMonday = (pTemp->tm_wday == 0) ? 6 : pTemp->tm_wday - 1;
-            tm_date.tm_mday -= daysToMonday;
-        }
-    } else if (strcmp(historyType, "month") == 0) {
-        // Gehe zum 1. des Monats
-        tm_date.tm_mday = 1;
-        // Speichere die Tage des Monats global für später (wird in createRequestExample verwendet)
-        int daysInMonth = getDaysInMonth(month, year);
-        g_ctx.historieSpan = daysInMonth * 86400;  // Tage * Sekunden pro Tag
-        DEBUG("Monat %d/%d hat %d Tage, SPAN = %u Sekunden\n", month, year, daysInMonth, g_ctx.historieSpan);
-    } else if (strcmp(historyType, "year") == 0) {
-        // Gehe zum 1. Januar
-        tm_date.tm_mon = 0;
-        tm_date.tm_mday = 1;
-    }
-    
-    // Jetzt finalen Timestamp berechnen
-    time_t timestamp = mktime(&tm_date);
-    if (timestamp == -1) {
-        fprintf(stderr, "Fehler: Konnte Datum nicht konvertieren\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    DEBUG("Konvertiere Datum '%s' (Typ: %s) zu Timestamp: %ld\n", dateStr, historyType, timestamp);
-    return timestamp;
-}
-
 int createRequestExample(SRscpFrameBuffer * frameBuffer) {
     RscpProtocol protocol;
     SRscpValue rootValue;
@@ -398,8 +73,9 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
         if (g_ctx.werteAbfragen){
                 DEBUG("Anfrage Tag 0x%08X\n", g_ctx.leseTag);
                 
-                // Check if this is a BAT_REQ_* tag (0x0300xxxx range) - needs BAT_REQ_DATA container
-                if ((g_ctx.leseTag & 0xFF000000) == 0x03000000 && (g_ctx.leseTag & 0x00FF0000) == 0x00000000) {
+                // Check if this is a BAT tag (0x03xxxxxx) but NOT a container tag (0x0304xxxx)
+                if ((g_ctx.leseTag & RSCP_TAG_BAT_NAMESPACE_MASK) == RSCP_TAG_BAT_NAMESPACE &&
+                    (g_ctx.leseTag & RSCP_TAG_BAT_CONTAINER_MASK) != RSCP_TAG_BAT_CONTAINER_PREFIX) {
                     DEBUG("BAT_REQ_* Tag erkannt - erstelle BAT_REQ_DATA Container\n");
                     SRscpValue batContainer;
                     protocol.createContainerValue(&batContainer, TAG_BAT_REQ_DATA);
@@ -408,9 +84,24 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                     protocol.appendValue(&rootValue, batContainer);
                     protocol.destroyValueData(batContainer);
                     g_ctx.batContainerQuery = true;
+                    g_ctx.pviContainerQuery = false;
+                // Check if this is a PVI tag (0x02xxxxxx) but NOT a container/response tag
+                } else if ((g_ctx.leseTag & RSCP_TAG_PVI_NAMESPACE_MASK) == RSCP_TAG_PVI_NAMESPACE &&
+                           (g_ctx.leseTag & RSCP_TAG_PVI_CONTAINER_MASK) != RSCP_TAG_PVI_CONTAINER_PREFIX &&
+                           !(g_ctx.leseTag & RSCP_TAG_RESPONSE_BIT)) {
+                    DEBUG("PVI_REQ_* Tag erkannt - erstelle PVI_REQ_DATA Container\n");
+                    SRscpValue pviContainer;
+                    protocol.createContainerValue(&pviContainer, TAG_PVI_REQ_DATA);
+                    protocol.appendValue(&pviContainer, TAG_PVI_INDEX, g_ctx.batIndex);
+                    protocol.appendValue(&pviContainer, g_ctx.leseTag);
+                    protocol.appendValue(&rootValue, pviContainer);
+                    protocol.destroyValueData(pviContainer);
+                    g_ctx.pviContainerQuery = true;
+                    g_ctx.batContainerQuery = false;
                 } else {
                     protocol.appendValue(&rootValue, g_ctx.leseTag);
                     g_ctx.batContainerQuery = false;
+                    g_ctx.pviContainerQuery = false;
                 }
         }
         
@@ -480,6 +171,13 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                 // Append history container to root
                 protocol.appendValue(&rootValue, historyContainer);
                 protocol.destroyValueData(historyContainer);
+        }
+
+        if (g_ctx.sysInfoAbfrage){
+                DEBUG("Anfrage System-Info Tags\n");
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_SERIAL_NUMBER);
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_PRODUCTION_DATE);
+                protocol.appendValue(&rootValue, TAG_INFO_REQ_SW_RELEASE);
         }
 
         if (g_ctx.manuelleSpeicherladung){
@@ -564,93 +262,14 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
 }
 
 // Get tag description from loaded tags (search all categories)
-const char* getTagDescription(uint32_t tag) {
-    // For RESPONSE tags (0x??8?????), try to find the REQUEST tag description first
-    uint32_t requestTag = tag;
-    if ((tag & 0x00800000) != 0) {
-        requestTag = tag & ~0x00800000;  // Clear response bit
-    }
-    
-    // Search through all categories for REQUEST tag first
-    for (auto& categoryPair : loadedTags) {
-        for (auto& tagInfo : categoryPair.second) {
-            if (tagInfo.hex == requestTag) {
-                return tagInfo.description.c_str();
-            }
-        }
-    }
-    
-    // If not found and this was a RESPONSE tag, try original tag
-    if (requestTag != tag) {
-        for (auto& categoryPair : loadedTags) {
-            for (auto& tagInfo : categoryPair.second) {
-                if (tagInfo.hex == tag) {
-                    return tagInfo.description.c_str();
-                }
-            }
-        }
-    }
-    
-    return NULL;
-}
-
-// Format millisecond Unix epoch timestamp to human-readable string
-std::string formatTimestamp(uint64_t milliseconds) {
-    time_t seconds = milliseconds / 1000;
-    struct tm timeinfo;
-    localtime_r(&seconds, &timeinfo);
-    
-    char buffer[64];
-    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
-    
-    return std::string(buffer);
-}
-
-const char* interpretValue(uint32_t tag, int64_t value) {
-    // Suche Interpretation in geladenen Daten aus e3dcset.tags
-    char key[64];
-    snprintf(key, sizeof(key), "0x%08X:%lld", tag, (long long)value);
-    auto it = loadedInterpretations.find(std::string(key));
-    if (it != loadedInterpretations.end()) {
-        return it->second.c_str();
-    }
-    
-    // Falls RESPONSE-Tag: Versuche mit REQUEST-Tag (zweites Byte & 0x7F)
-    uint8_t secondByte = (tag >> 16) & 0xFF;
-    if (secondByte >= 0x80) {
-        // Konvertiere RESPONSE zu REQUEST: zweites Byte AND 0x7F
-        uint32_t requestTag = (tag & 0xFF00FFFF) | (((secondByte & 0x7F) << 16));
-        snprintf(key, sizeof(key), "0x%08X:%lld", requestTag, (long long)value);
-        it = loadedInterpretations.find(std::string(key));
-        if (it != loadedInterpretations.end()) {
-            return it->second.c_str();
-        }
-    }
-    
-    // Keine Interpretation verfügbar
-    return NULL;
-}
-
-// Unified value formatter - eliminiert Code-Duplikation in Response-Handling
-void printFormattedValue(uint32_t tag, const char* valueStr, int64_t numericValue) {
-    if (g_ctx.quietMode) {
-        printf("%s\n", valueStr);
-    } else {
-        const char* interp = interpretValue(tag, numericValue);
-        if (interp) {
-            printf("%s (%s)\n", valueStr, interp);
-        } else {
-            printf("%s\n", valueStr);
-        }
-    }
-}
-
 int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     // check if any of the response has the error flag set and react accordingly
     if(response->dataType == RSCP::eTypeError) {
         // handle error for example access denied errors
         uint32_t uiErrorCode = protocol->getValueAsUInt32(response);
-        printf("Tag 0x%08X received error code %u.\n", response->tag, uiErrorCode);
+        const char* errorDesc = getErrorDescription(uiErrorCode);
+        fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                response->tag, uiErrorCode, uiErrorCode, errorDesc);
         return -1;
     }
 
@@ -663,6 +282,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         uint8_t ucAccessLevel = protocol->getValueAsUChar8(response);
         if(ucAccessLevel > 0) {
             iAuthenticated = 1;
+        } else {
+            fprintf(stderr, "FEHLER: Authentifizierung fehlgeschlagen - Zugriff verweigert\n");
+            exit(EXIT_FAILURE);
         }
         DEBUG("RSCP authentitication level %i\n", ucAccessLevel);
         break;
@@ -719,7 +341,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_PV: {    // response for TAG_EMS_REQ_POWER_PV
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_PV);
+            jsonField("name", "EMS_POWER_PV");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS PV power is %i W\n", iPower);
@@ -728,7 +357,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_BAT: {    // response for TAG_EMS_REQ_POWER_BAT
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_BAT);
+            jsonField("name", "EMS_POWER_BAT");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS BAT power is %i W\n", iPower);
@@ -737,7 +373,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_HOME: {    // response for TAG_EMS_REQ_POWER_HOME
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_HOME);
+            jsonField("name", "EMS_POWER_HOME");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS house power is %i W\n", iPower);
@@ -746,7 +389,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_GRID: {    // response for TAG_EMS_REQ_POWER_GRID
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_GRID);
+            jsonField("name", "EMS_POWER_GRID");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS grid power is %i W\n", iPower);
@@ -755,7 +405,14 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
     }
     case TAG_EMS_POWER_ADD: {    // response for TAG_EMS_REQ_POWER_ADD
         int32_t iPower = protocol->getValueAsInt32(response);
-        if (g_ctx.quietMode) {
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonFieldInt("tag", TAG_EMS_POWER_ADD);
+            jsonField("name", "EMS_POWER_ADD");
+            jsonFieldInt("value", iPower);
+            jsonField("unit", "W");
+            jsonEnd();
+        } else if (g_ctx.quietMode) {
             printf("%i\n", iPower);
         } else {
             printf("EMS add power meter power is %i W\n", iPower);
@@ -768,23 +425,30 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         // Calculate expected response tag from request tag (REQUEST 0x03xxxx -> RESPONSE 0x38xxxx)
         uint32_t expectedResponseTag = 0;
         if (g_ctx.batContainerQuery && !g_ctx.modulInfoDump) {
-            expectedResponseTag = g_ctx.leseTag | 0x00800000;  // Set bit 23 (0x00800000) for RESPONSE
+            expectedResponseTag = g_ctx.leseTag | RSCP_TAG_RESPONSE_BIT;  // Set bit 23 for RESPONSE
         }
         
         bool foundRequestedTag = false;
         bool receivedDCBData = false;  // Track if this response contained actual DCB data
         
         // Print header for module info dump (only on first call for this module)
-        if (g_ctx.modulInfoDump && !g_ctx.quietMode && g_ctx.isFirstModuleDumpRequest) {
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode && !g_ctx.jsonOutput && g_ctx.isFirstModuleDumpRequest) {
             printf("Batterie Modul %u:\n", g_ctx.batIndex);
+        }
+        
+        // Reset JSON buffer on first request
+        if (g_ctx.modulInfoDump && g_ctx.jsonOutput && g_ctx.isFirstModuleDumpRequest) {
+            g_jsonModuleDump.reset();
         }
         
         for(size_t i = 0; i < batteryData.size(); ++i) {
             // Check for errors first - stop processing if error found
             if(batteryData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&batteryData[i]);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
                 // Always output errors to stderr (quiet-mode contract)
-                fprintf(stderr, "Fehler: Tag 0x%08X, Code %u\n", batteryData[i].tag, uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        batteryData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                 // Clean up vector elements
                 for(size_t j = 0; j < batteryData.size(); ++j) {
                     protocol->destroyValueData(&batteryData[j]);
@@ -807,6 +471,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 if (dcbCount > 0 && g_ctx.isFirstModuleDumpRequest) {
                     g_ctx.needMoreDCBRequests = true;
                     g_ctx.currentDCBIndex = 0;
+                    g_ctx.dcbRequestRetries = 0;  // Reset retry counter
                     g_ctx.isFirstModuleDumpRequest = false;
                 } else if (dcbCount == 0) {
                     // No DCBs - reset state
@@ -828,7 +493,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             
             // Print tag prefix - formatted for module dump, raw for single query
             // Skip printing BAT_DCB_INFO tag itself (only print its contents)
-            if (!g_ctx.quietMode && batteryData[i].tag != TAG_BAT_DCB_INFO) {
+            // In JSON mode for module dump, skip label printing entirely (collected in buffer)
+            if (!g_ctx.quietMode && !g_ctx.jsonOutput && batteryData[i].tag != TAG_BAT_DCB_INFO) {
                 if (g_ctx.modulInfoDump) {
                     // Friendly label for module info dump
                     const char* label = getTagDescription(batteryData[i].tag);
@@ -851,7 +517,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     // Use std::llround for proper rounding (handles negative values)
                     int64_t roundedValue = std::llround(value);
                     const char* interp = interpretValue(batteryData[i].tag, roundedValue);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        std::string key = tagName ? tagName : hexKey;
+                        g_jsonModuleDump.addField(key, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump && interp) {
                         printf("  %s (%s)\n", buf, interp);
@@ -868,7 +539,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     uint8_t value = protocol->getValueAsUChar8(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -886,7 +561,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     int32_t value = protocol->getValueAsInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -904,7 +583,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     uint32_t value = protocol->getValueAsUInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -920,7 +603,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 }
                 case RSCP::eTypeString: {
                     std::string str = protocol->getValueAsString(&batteryData[i]);
-                    if (g_ctx.modulInfoDump) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addFieldStr(tagName ? tagName : hexKey, str);
+                    } else if (g_ctx.modulInfoDump) {
                         printf("  %s\n", str.c_str());
                     } else {
                         printf("%s\n", str.c_str());
@@ -944,14 +631,85 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 receivedDCBData = true;  // CRITICAL: Set flag regardless of output mode!
                             } else if (currentDcbIndex >= 0) {
                                 // Check if this is a DCB-related tag
-                                if ((tag & 0xFFF00000) == 0x03800000) {
+                                if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                     dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[j]));
                                 }
                             }
                         }
                         
-                        // Print grouped DCB data (only if NOT in quiet mode)
-                        if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        // Output grouped DCB data
+                        if (dcbData.size() > 0) {
+                          if (g_ctx.jsonOutput) {
+                            // JSON mode: collect DCB data into buffer
+                            for (auto& dcbPair : dcbData) {
+                                g_jsonModuleDump.startDcb(dcbPair.first);
+                                for (auto& tagValuePair : dcbPair.second) {
+                                    const char* tagName = getTagNameByHex(tagValuePair.first);
+                                    char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", tagValuePair.first);
+                                    std::string key = tagName ? tagName : hexKey;
+                                    char vbuf[64];
+                                    switch(tagValuePair.second.dataType) {
+                                        case RSCP::eTypeBool:
+                                            g_jsonModuleDump.addDcbField(key, protocol->getValueAsBool(&tagValuePair.second) ? "true" : "false");
+                                            break;
+                                        case RSCP::eTypeChar8:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsChar8(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUChar8:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUChar8(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt16:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsInt16(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt16:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUInt16(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt32:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsInt32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt32:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUInt32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt64:
+                                            snprintf(vbuf, sizeof(vbuf), "%lld", (long long)protocol->getValueAsInt64(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt64: {
+                                            uint64_t val = protocol->getValueAsUInt64(&tagValuePair.second);
+                                            if (tagValuePair.first == TAG_BAT_DCB_LAST_MESSAGE_TIMESTAMP) {
+                                                g_jsonModuleDump.addDcbFieldStr(key, formatTimestamp(val));
+                                            } else {
+                                                snprintf(vbuf, sizeof(vbuf), "%llu", (unsigned long long)val);
+                                                g_jsonModuleDump.addDcbField(key, vbuf);
+                                            }
+                                            break;
+                                        }
+                                        case RSCP::eTypeFloat32:
+                                            snprintf(vbuf, sizeof(vbuf), "%.2f", protocol->getValueAsFloat32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeDouble64:
+                                            snprintf(vbuf, sizeof(vbuf), "%.4f", protocol->getValueAsDouble64(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeString: {
+                                            std::string str = protocol->getValueAsString(&tagValuePair.second);
+                                            g_jsonModuleDump.addDcbFieldStr(key, str);
+                                            break;
+                                        }
+                                        default:
+                                            break;
+                                    }
+                                }
+                            }
+                          } else if (!g_ctx.quietMode) {
+                            // Plaintext mode: print DCB data
                             for (auto& dcbPair : dcbData) {
                                 printf("Zellblock #%u\n", dcbPair.first);
                                 for (auto& tagValuePair : dcbPair.second) {
@@ -1043,6 +801,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 }
                                 printf("\n");
                             }
+                          }
                         }
                         
                         // Clean up
@@ -1075,13 +834,31 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         
         // CRITICAL: Multi-DCB Loop Management
         // Only increment if we actually received DCB data (not just battery-level response)
-        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump && receivedDCBData) {
-            g_ctx.currentDCBIndex++;
-            
-            // Check if we've queried all DCBs
-            if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
-                g_ctx.needMoreDCBRequests = false;
-                g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+        if (g_ctx.needMoreDCBRequests && g_ctx.modulInfoDump) {
+            if (receivedDCBData) {
+                // Success - received DCB data, reset retry counter
+                g_ctx.dcbRequestRetries = 0;
+                g_ctx.currentDCBIndex++;
+                
+                // Check if we've queried all DCBs
+                if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                    g_ctx.needMoreDCBRequests = false;
+                    g_ctx.isFirstModuleDumpRequest = true;  // Reset for next dump
+                }
+            } else {
+                // No DCB data received - increment retry counter
+                g_ctx.dcbRequestRetries++;
+                
+                // Max retries per DCB index to prevent infinite loops (configurable via max_retries)
+                if (g_ctx.dcbRequestRetries >= e3dc_config.max_retries) {
+                    fprintf(stderr, "WARNING: DCB #%d failed after %u attempts - skipping\n",
+                            g_ctx.currentDCBIndex, e3dc_config.max_retries);
+                    g_ctx.dcbRequestRetries = 0;
+                    g_ctx.currentDCBIndex++;  // Weiter mit nächstem DCB
+                    if (g_ctx.currentDCBIndex >= g_ctx.totalDCBs) {
+                        g_ctx.needMoreDCBRequests = false;
+                    }
+                }
             }
         }
         
@@ -1123,7 +900,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         if (tag == TAG_BAT_DCB_INDEX) {
                             currentDcbIndex = protocol->getValueAsUChar8(&dcbInfoData[i]);
                         } else if (currentDcbIndex >= 0) {
-                            if ((tag & 0xFFF00000) == 0x03800000) {
+                            if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                 dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
                             }
                         }
@@ -1178,7 +955,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             DEBUG("Gefundener DCB_INDEX: %d\n", currentDcbIndex);
                         } else if (currentDcbIndex >= 0) {
                             // Check if this is a DCB-related tag
-                            if ((tag & 0xFFF00000) == 0x03800000) {
+                            if ((tag & RSCP_TAG_DCB_RANGE_MASK) == RSCP_TAG_DCB_RESPONSE_VALUE) {
                                 dcbData[currentDcbIndex].push_back(std::make_pair(tag, dcbInfoData[i]));
                                 DEBUG("  Tag 0x%08X zugeordnet zu DCB %d\n", tag, currentDcbIndex);
                             }
@@ -1254,6 +1031,145 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             break;
         }
 
+    case TAG_PVI_DATA: {        // response for TAG_PVI_REQ_DATA
+        std::vector<SRscpValue> pviData = protocol->getValueAsContainer(response);
+        
+        // Calculate expected response tag from request tag
+        uint32_t expectedResponseTag = 0;
+        if (g_ctx.pviContainerQuery) {
+            expectedResponseTag = g_ctx.leseTag | RSCP_TAG_RESPONSE_BIT;
+        }
+        
+        bool foundRequestedTag = false;
+        
+        for(size_t i = 0; i < pviData.size(); ++i) {
+            if(pviData[i].dataType == RSCP::eTypeError) {
+                uint32_t uiErrorCode = protocol->getValueAsUInt32(&pviData[i]);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        pviData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
+                for(size_t j = 0; j < pviData.size(); ++j) {
+                    protocol->destroyValueData(&pviData[j]);
+                }
+                g_ctx.pviContainerQuery = false;
+                return -1;
+            }
+            
+            // Skip PVI_INDEX in output
+            if (pviData[i].tag == TAG_PVI_INDEX) {
+                continue;
+            }
+            
+            // In quiet mode, only process the requested tag's response
+            if (g_ctx.quietMode && pviData[i].tag != expectedResponseTag) {
+                continue;
+            }
+            
+            if (pviData[i].tag == expectedResponseTag) {
+                foundRequestedTag = true;
+            }
+            
+            // Print value based on datatype
+            switch(pviData[i].dataType) {
+                case RSCP::eTypeFloat32: {
+                    float value = protocol->getValueAsFloat32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%.2f\n", value);
+                    } else if (g_ctx.jsonOutput) {
+                        jsonStart();
+                        jsonFieldInt("tag", pviData[i].tag);
+                        jsonField("value", std::to_string(value).c_str());
+                        jsonEnd();
+                    } else {
+                        printf("Tag 0x%08X: %.2f\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeBool: {
+                    bool value = protocol->getValueAsBool(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", value ? "true" : "false");
+                    } else {
+                        printf("Tag 0x%08X: %s\n", pviData[i].tag, value ? "true" : "false");
+                    }
+                    break;
+                }
+                case RSCP::eTypeUChar8: {
+                    uint8_t value = protocol->getValueAsUChar8(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeInt32: {
+                    int32_t value = protocol->getValueAsInt32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%d\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %d\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt32: {
+                    uint32_t value = protocol->getValueAsUInt32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt16: {
+                    uint16_t value = protocol->getValueAsUInt16(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeString: {
+                    std::string str = protocol->getValueAsString(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", str.c_str());
+                    } else {
+                        printf("Tag 0x%08X: %s\n", pviData[i].tag, str.c_str());
+                    }
+                    break;
+                }
+                case RSCP::eTypeContainer: {
+                    if (!g_ctx.quietMode) {
+                        printf("Tag 0x%08X: (Container mit %zu Elementen)\n", 
+                               pviData[i].tag, protocol->getValueAsContainer(&pviData[i]).size());
+                    }
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Tag 0x%08X: (Typ %d)\n", pviData[i].tag, pviData[i].dataType);
+                    }
+                    break;
+            }
+            
+            if (g_ctx.quietMode && foundRequestedTag) {
+                break;
+            }
+        }
+        
+        if (g_ctx.quietMode && !foundRequestedTag) {
+            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in PVI Response gefunden\n", expectedResponseTag);
+        }
+        
+        for(size_t i = 0; i < pviData.size(); ++i) {
+            protocol->destroyValueData(&pviData[i]);
+        }
+        
+        g_ctx.pviContainerQuery = false;
+        break;
+    }
+
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;
             std::vector<SRscpValue> PMData = protocol->getValueAsContainer(response);
@@ -1261,7 +1177,9 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 if(PMData[i].dataType == RSCP::eTypeError) {
                     // handle error for example access denied errors
                     uint32_t uiErrorCode = protocol->getValueAsUInt32(&PMData[i]);
-                    printf("TAG_EMS_GET_POWER_SETTINGS 0x%08X received error code %u.\n", PMData[i].tag, uiErrorCode);
+                    const char* errorDesc = getErrorDescription(uiErrorCode);
+                    fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                            PMData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                     return -1;
                 }
                 // check each PM sub tag
@@ -1369,14 +1287,26 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             }
         }
         
-        printf("Zeitraum: %s - %s\n", startStr, endStr);
+        if (g_ctx.jsonOutput) {
+            jsonStart();
+            jsonField("type", typeStr);
+            jsonField("start_date", startStr);
+            jsonField("end_date", endStr);
+            jsonField("interval", intervalName);
+        } else if (g_ctx.rawOutput) {
+            // Raw mode: no "Zeitraum:" output (CSV header comes with SUM_CONTAINER)
+        } else {
+            printf("Zeitraum: %s - %s\n", startStr, endStr);
+        }
         
         std::vector<SRscpValue> historyData = protocol->getValueAsContainer(response);
         
         for(size_t i = 0; i < historyData.size(); ++i) {
             if(historyData[i].dataType == RSCP::eTypeError) {
                 uint32_t uiErrorCode = protocol->getValueAsUInt32(&historyData[i]);
-                printf("Fehler: Tag 0x%08X, Code %u\n", historyData[i].tag, uiErrorCode);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        historyData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
                 continue;
             }
             
@@ -1427,21 +1357,78 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                         }
                     }
                     
-                    printf("PV-Produktion:      %.2f kWh\n", dcPower / 1000.0);
-                    printf("Batterie geladen:   %.2f kWh\n", batPowerIn / 1000.0);
-                    printf("Batterie entladen:  %.2f kWh\n", batPowerOut / 1000.0);
-                    printf("Netzbezug:          %.2f kWh\n", gridPowerOut / 1000.0);
-                    printf("Netzeinspeisung:    %.2f kWh\n", gridPowerIn / 1000.0);
-                    printf("Hausverbrauch:      %.2f kWh\n", consumption / 1000.0);
-                    if (autarky > 0) printf("Autarkie:           %.1f %%\n", autarky);
+                    if (g_ctx.rawOutput) {
+                        // In raw mode, only print CSV header from sum container
+                        printf("timestamp,pv_wh,bat_in_wh,bat_out_wh,grid_in_wh,grid_out_wh,consumption_wh\n");
+                    } else if (g_ctx.jsonOutput) {
+                        jsonFieldFloat("pv_production_kwh", dcPower / 1000.0);
+                        jsonFieldFloat("battery_charge_kwh", batPowerIn / 1000.0);
+                        jsonFieldFloat("battery_discharge_kwh", batPowerOut / 1000.0);
+                        jsonFieldFloat("grid_import_kwh", gridPowerOut / 1000.0);
+                        jsonFieldFloat("grid_export_kwh", gridPowerIn / 1000.0);
+                        jsonFieldFloat("consumption_kwh", consumption / 1000.0);
+                        if (autarky > 0) jsonFieldFloat("autarky_percent", autarky);
+                    } else {
+                        printf("PV-Produktion:      %.2f kWh\n", dcPower / 1000.0);
+                        printf("Batterie geladen:   %.2f kWh\n", batPowerIn / 1000.0);
+                        printf("Batterie entladen:  %.2f kWh\n", batPowerOut / 1000.0);
+                        printf("Netzbezug:          %.2f kWh\n", gridPowerOut / 1000.0);
+                        printf("Netzeinspeisung:    %.2f kWh\n", gridPowerIn / 1000.0);
+                        printf("Hausverbrauch:      %.2f kWh\n", consumption / 1000.0);
+                        if (autarky > 0) printf("Autarkie:           %.1f %%\n", autarky);
+                    }
                     
                     protocol->destroyValueData(sumData);
                     break;
                 }
                 case TAG_DB_VALUE_CONTAINER: {
-                    // Datenpunkte werden nicht angezeigt - nur Zusammenfassung
-                    std::vector<SRscpValue> tmpData = protocol->getValueAsContainer(&historyData[i]);
-                    protocol->destroyValueData(tmpData);
+                    if (g_ctx.rawOutput) {
+                        static uint32_t rawCounter = 0;
+                        std::vector<SRscpValue> valData = protocol->getValueAsContainer(&historyData[i]);
+                        
+                        float vBatIn = 0, vBatOut = 0, vDcPower = 0;
+                        float vGridIn = 0, vGridOut = 0, vConsumption = 0;
+                        
+                        for(size_t j = 0; j < valData.size(); ++j) {
+                            switch(valData[j].tag) {
+                                case TAG_DB_GRAPH_INDEX:
+                                    // Graph index ignored for timestamp - using counter instead
+                                    break;
+                                case TAG_DB_BAT_POWER_IN:
+                                    vBatIn = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_BAT_POWER_OUT:
+                                    vBatOut = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_DC_POWER:
+                                    vDcPower = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_GRID_POWER_IN:
+                                    vGridIn = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_GRID_POWER_OUT:
+                                    vGridOut = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                case TAG_DB_CONSUMPTION:
+                                    vConsumption = protocol->getValueAsFloat32(&valData[j]);
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                        
+                        time_t valTime = g_ctx.historieStartTime + (rawCounter * g_ctx.historieInterval);
+                        printf("%ld,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
+                               (long)valTime,
+                               vDcPower, vBatIn, vBatOut, vGridIn, vGridOut, vConsumption);
+                        rawCounter++;
+                        
+                        protocol->destroyValueData(valData);
+                    } else {
+                        // Without --raw: skip individual data points, only show summary
+                        std::vector<SRscpValue> tmpData = protocol->getValueAsContainer(&historyData[i]);
+                        protocol->destroyValueData(tmpData);
+                    }
                     break;
                 }
                 default:
@@ -1451,62 +1438,154 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         }
         
         protocol->destroyValueData(historyData);
+        
+        if (g_ctx.jsonOutput) {
+            jsonEnd();
+        }
+        
         break;
     }
     
+    // System-Info response tags
+    case TAG_INFO_SERIAL_NUMBER: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("serial_number", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Seriennummer:      %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+    case TAG_INFO_PRODUCTION_DATE: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("production_date", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Produktionsdatum:  %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+    case TAG_INFO_SW_RELEASE: {
+        std::string value = protocol->getValueAsString(response);
+        if (g_ctx.jsonOutput) {
+            jsonField("sw_release", value.c_str());
+        } else if (!g_ctx.quietMode) {
+            printf("Software Version:  %s\n", value.c_str());
+        } else {
+            printf("%s\n", value.c_str());
+        }
+        break;
+    }
+
     // ...
     default:
         // Generic handler for read requests
         if (g_ctx.werteAbfragen) {
-            if (!g_ctx.quietMode) {
+            if (g_ctx.jsonOutput) {
+                jsonStart();
+                jsonFieldInt("tag", response->tag);
+                
+                // Add tag name if available
+                const char* tagDesc = getTagDescription(response->tag);
+                if (tagDesc) {
+                    jsonField("description", tagDesc);
+                }
+            } else if (!g_ctx.quietMode) {
                 printf("Tag 0x%08X: ", response->tag);
             }
+            
             switch(response->dataType) {
                 case RSCP::eTypeBool: {
                     bool bValue = protocol->getValueAsBool(response);
-                    printFormattedValue(response->tag, bValue ? "true" : "false", bValue ? 1 : 0);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "bool");
+                        jsonField("value", bValue ? "true" : "false", false);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, bValue ? "true" : "false", bValue ? 1 : 0);
+                    }
                     break;
                 }
                 case RSCP::eTypeChar8: {
                     int8_t value = protocol->getValueAsChar8(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "char8");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUChar8: {
                     uint8_t value = protocol->getValueAsUChar8(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uchar8");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt16: {
                     int16_t value = protocol->getValueAsInt16(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "int16");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUInt16: {
                     uint16_t value = protocol->getValueAsUInt16(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uint16");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt32: {
                     int32_t value = protocol->getValueAsInt32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "int32");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeUInt32: {
                     uint32_t value = protocol->getValueAsUInt32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    printFormattedValue(response->tag, buf, value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "uint32");
+                        jsonFieldInt("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, value);
+                    }
                     break;
                 }
                 case RSCP::eTypeInt64: {
@@ -1543,18 +1622,48 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     float value = protocol->getValueAsFloat32(response);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%.2f", value);
-                    printFormattedValue(response->tag, buf, (int64_t)value);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "float32");
+                        jsonFieldFloat("value", value);
+                        jsonEnd();
+                    } else {
+                        printFormattedValue(response->tag, buf, (int64_t)value);
+                    }
                     break;
                 }
-                case RSCP::eTypeDouble64:
-                    printf("%.2f\n", protocol->getValueAsDouble64(response));
+                case RSCP::eTypeDouble64: {
+                    double value = protocol->getValueAsDouble64(response);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "double64");
+                        jsonFieldFloat("value", value);
+                        jsonEnd();
+                    } else {
+                        printf("%.2f\n", value);
+                    }
                     break;
-                case RSCP::eTypeBitfield:
-                    printf("0x%08X\n", protocol->getValueAsUInt32(response));
+                }
+                case RSCP::eTypeBitfield: {
+                    uint32_t value = protocol->getValueAsUInt32(response);
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "bitfield");
+                        char hexBuf[16];
+                        snprintf(hexBuf, sizeof(hexBuf), "0x%08X", value);
+                        jsonField("value", hexBuf);
+                        jsonEnd();
+                    } else {
+                        printf("0x%08X\n", value);
+                    }
                     break;
+                }
                 case RSCP::eTypeString: {
                     std::string str = protocol->getValueAsString(response);
-                    printf("%s\n", str.c_str());
+                    if (g_ctx.jsonOutput) {
+                        jsonField("type", "string");
+                        jsonField("value", str.c_str());
+                        jsonEnd();
+                    } else {
+                        printf("%s\n", str.c_str());
+                    }
                     break;
                 }
                 case RSCP::eTypeContainer: {
@@ -1641,9 +1750,19 @@ static int processReceiveBuffer(const unsigned char * ucBuffer, int iLength)
 
     int iProcessedBytes = iResult;
 
+    // JSON wrapping for --info (all system info in one JSON object)
+    if (g_ctx.sysInfoAbfrage && g_ctx.jsonOutput) {
+        jsonStart();
+    }
+
     // process each SRscpValue struct seperately
     for(size_t i = 0; i < frame.data.size(); i++) {
         handleResponseValue(&protocol, &frame.data[i]);
+    }
+
+    // Close JSON object for --info
+    if (g_ctx.sysInfoAbfrage && g_ctx.jsonOutput) {
+        jsonEnd();
     }
 
     // destroy frame data and free memory
@@ -1758,7 +1877,7 @@ static void receiveLoop(bool & bStopExecution)
     }
 }
 
-static void mainLoop(void)
+void mainLoop(void)
 {
     RscpProtocol protocol;
     bool bStopExecution = false;
@@ -1766,6 +1885,15 @@ static void mainLoop(void)
 
     while(!bStopExecution)
     {
+        // Check for watch mode interruption (Ctrl+C)
+        if (g_ctx.watchMode && g_watchInterrupted) {
+            if (!g_ctx.quietMode && !g_ctx.jsonOutput) {
+                printf("\n[Watch mode interrupted]\n");
+            }
+            bStopExecution = true;
+            break;
+        }
+
         //--------------------------------------------------------------------------------------------------------------
         // RSCP Transmit Frame Block Data
         //--------------------------------------------------------------------------------------------------------------
@@ -1802,9 +1930,39 @@ static void mainLoop(void)
                 // go into receive loop and wait for response
                 receiveLoop(bStopExecution);
                 
-                // After first receive, check if we need more DCB requests
+                // Watch mode: continue polling after successful response
+                if (g_ctx.watchMode && counter > 0) {
+                    // Output timestamp prefix for next iteration
+                    if (!g_ctx.quietMode) {
+                        time_t now = time(NULL);
+                        struct tm *tm_info = localtime(&now);
+                        char timeStr[64];
+                        strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", tm_info);
+                        
+                        if (g_ctx.jsonOutput) {
+                            // JSON mode: just print timestamp (output.cpp will handle the rest)
+                            // Timestamp will be embedded in JSON by output functions
+                        } else {
+                            // Normal mode: print separator with timestamp
+                            printf("\n--- %s ---\n", timeStr);
+                        }
+                    }
+                    
+                    // Sleep before next poll
+                    sleep(g_ctx.watchInterval);
+                    
+                    // Reset authentication flag to force re-connection if needed
+                    // (connection stays open, but we re-authenticate on errors)
+                    continue; // Continue watch loop
+                }
+                
+                // Non-watch mode: After first receive, check if we need more DCB requests
                 if (counter > 0) {
                     if (!g_ctx.needMoreDCBRequests) {
+                        // Output JSON module dump buffer if applicable
+                        if (g_ctx.modulInfoDump && g_ctx.jsonOutput) {
+                            g_jsonModuleDump.output(g_ctx.batIndex);
+                        }
                         // No more requests needed - stop
                         bStopExecution = true;
                     }
@@ -1815,7 +1973,7 @@ static void mainLoop(void)
         protocol.destroyFrameData(&frameBuffer);
 
         // main loop sleep / cycle time before next request (only if continuing)
-        if (!bStopExecution) {
+        if (!bStopExecution && !g_ctx.watchMode) {
             sleep(1);
         }
 
@@ -1824,480 +1982,4 @@ static void mainLoop(void)
     }
 }
 
-uint32_t getTagByName(const char* name) {
-    // Zuerst in geladenen Tags suchen
-    if (!loadedTags.empty()) {
-        for (auto& catPair : loadedTags) {
-            for (const auto& tag : catPair.second) {
-                if (strcasecmp(name, tag.name.c_str()) == 0) {
-                    return tag.hex;
-                }
-            }
-        }
-    }
-    
-    // Tag nicht gefunden
-    fprintf(stderr, "FEHLER: Tag '%s' nicht in der Tags-Datei gefunden!\n", name);
-    fprintf(stderr, "Bitte verwenden Sie './e3dcset -l 0' um verfügbare Tags anzuzeigen,\n");
-    fprintf(stderr, "oder nutzen Sie direkt den Hex-Wert (z.B. -r 0x01000001).\n\n");
-    exit(EXIT_FAILURE);
-}
-
-bool isRequestTag(uint32_t tag) {
-    // REQUEST Tags haben im zweiten Byte (Bits 16-23) einen Wert < 0x80
-    // RESPONSE Tags haben im zweiten Byte einen Wert >= 0x80
-    uint8_t secondByte = (tag >> 16) & 0xFF;
-    return secondByte < 0x80;
-}
-
-void printTagList(int category) {
-    // Validierung mit Enum statt Magic Numbers
-    if (category < CATEGORY_OVERVIEW || category >= CATEGORY_MAX) {
-        fprintf(stderr, "\nFehler: Ungültige Kategorie %d\n\n", category);
-        fprintf(stderr, "Verfügbare Kategorien:\n");
-        fprintf(stderr, "  %d - Übersicht aller Kategorien\n", CATEGORY_OVERVIEW);
-        for (int i = 0; i < NUM_CATEGORIES; i++) {
-            fprintf(stderr, "  %d - %s (%s)\n", 
-                    categoryDescriptors[i].id, 
-                    categoryDescriptors[i].shortName, 
-                    categoryDescriptors[i].fullName);
-        }
-        fprintf(stderr, "\nBeispiel: ./e3dcset -l 0  (Übersicht)\n");
-        fprintf(stderr, "         ./e3dcset -l 1  (EMS Tags anzeigen)\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (category == CATEGORY_OVERVIEW) {
-        printf("\n=== Verfügbare RSCP Tag Kategorien ===\n\n");
-        for (int i = 0; i < NUM_CATEGORIES; i++) {
-            const CategoryDescriptor& desc = categoryDescriptors[i];
-            printf("  %d - %s (%s)", desc.id, desc.shortName, desc.fullName);
-            // Zeige Anzahl geladener Tags an, falls verfügbar
-            if (!loadedTags.empty() && loadedTags.find(desc.id) != loadedTags.end()) {
-                printf(" (%zu Tags geladen)", loadedTags[desc.id].size());
-            }
-            printf("\n");
-        }
-        printf("\n=== Verwendung ===\n");
-        printf("  ./e3dcset -l <kategorie>     # Tag-Liste anzeigen\n");
-        printf("  ./e3dcset -r <tag-name>      # Tag-Wert abfragen\n\n");
-        printf("=== Beispiele ===\n");
-        printf("  ./e3dcset -l %d               # EMS Tags anzeigen\n", CATEGORY_EMS);
-        printf("  ./e3dcset -l %d               # Battery Tags anzeigen\n", CATEGORY_BAT);
-        printf("  ./e3dcset -r EMS_POWER_PV    # PV-Leistung abfragen\n");
-        printf("  ./e3dcset -r BAT_DATA        # Batterie-Daten abfragen\n");
-        printf("  ./e3dcset -r EMS_BAT_SOC -q  # Nur Wert ausgeben\n\n");
-        return;
-    }
-    
-    // Find descriptor for this category
-    const char* categoryName = "Unknown";
-    for (int i = 0; i < NUM_CATEGORIES; i++) {
-        if (categoryDescriptors[i].id == category) {
-            categoryName = categoryDescriptors[i].fullName;
-            break;
-        }
-    }
-    
-    printf("\n=== Kategorie %d: %s ===\n\n", category, categoryName);
-    
-    printf("%-30s %-12s %s\n", "Tag-Name", "Hex-Wert", "Beschreibung");
-    printf("%-30s %-12s %s\n", "------------------------------", "------------", "---------------------------------------------");
-    
-    // Tags aus geladener Datei verwenden
-    if (!loadedTags.empty() && loadedTags.find(category) != loadedTags.end()) {
-        for (const auto& tag : loadedTags[category]) {
-            printf("%-30s 0x%08X   %s\n", tag.name.c_str(), tag.hex, tag.description.c_str());
-        }
-    } else {
-        fprintf(stderr, "\nFEHLER: Keine Tags für Kategorie %d gefunden!\n", category);
-        fprintf(stderr, "Bitte überprüfen Sie die Tag-Datei.\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    printf("\n=== Beispiele ===\n");
-    if (category == CATEGORY_EMS) {
-        printf("  ./e3dcset -r EMS_POWER_PV       # PV-Leistung abfragen\n");
-        printf("  ./e3dcset -r EMS_BAT_SOC -q     # Batterie-SOC (nur Wert)\n");
-    } else if (category == CATEGORY_BAT) {
-        printf("  ./e3dcset -r BAT_DATA           # Batterie-Daten Container\n");
-        printf("  ./e3dcset -r BAT_RSOC -q        # RSOC (nur Wert)\n");
-    } else {
-        printf("  ./e3dcset -r <tag-name>         # Tag-Wert abfragen\n");
-        printf("  ./e3dcset -r <tag-name> -q      # Nur Wert ausgeben\n");
-    }
-    printf("  ./e3dcset -r 0x%08X       # Mit Hex-Wert\n\n", category == CATEGORY_EMS ? TAG_EMS_REQ_BAT_SOC : TAG_BAT_REQ_DATA);
-}
-
-void usage(void){
-    fprintf(stderr, "\n   Usage: e3dcset [-c LadeLeistung] [-d EntladeLeistung] [-e LadungsMenge] [-E Reserve] [-a] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -r TAG_NAME [-i Modul-Index] [-q] [-p Pfad zur Konfigurationsdatei] [-t Pfad zur Tags-Datei]\n");
-    fprintf(stderr, "          e3dcset -m <Modul-Index> [-p Pfad zur Konfigurationsdatei]\n");
-    fprintf(stderr, "          e3dcset -l [kategorie]\n");
-    fprintf(stderr, "          e3dcset -H <typ> [-D datum] [-p Pfad zur Konfigurationsdatei]\n\n");
-    fprintf(stderr, "   Optionen:\n");
-    fprintf(stderr, "     -c  LadeLeistung in Watt setzen\n");
-    fprintf(stderr, "     -d  EntladeLeistung in Watt setzen\n");
-    fprintf(stderr, "     -e  Manuelle Ladungsmenge in Wh setzen (0 = stoppen)\n");
-    fprintf(stderr, "     -E  Notstromreserve in Wh setzen (Workaround fuer Netzladung)\n");
-    fprintf(stderr, "     -a  Automatik-Modus aktivieren\n");
-    fprintf(stderr, "     -r  Wert abfragen (Tag-Name, Named Tag oder Hex-Wert)\n");
-    fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
-    fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
-    fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
-    fprintf(stderr, "     -l  RSCP Tag-Liste anzeigen (ohne Argument: Übersicht, 1-8 = Kategorie)\n");
-    fprintf(stderr, "     -p  Pfad zur Konfigurationsdatei (Standard: e3dcset.config)\n");
-    fprintf(stderr, "     -t  Pfad zur Tags-Datei (Standard: e3dcset.tags)\n");
-    fprintf(stderr, "     -H  Historische Daten abfragen (day/week/month/year)\n");
-    fprintf(stderr, "     -D  Datum (Format: YYYY-MM-DD oder 'today', Standard: heute)\n\n");
-    fprintf(stderr, "   Hinweis: -r, -m und -H können nicht mit -c, -d, -e, -E oder -a kombiniert werden\n\n");
-    fprintf(stderr, "   Beispiele:\n");
-    fprintf(stderr, "     e3dcset -l                      # Kategorie-Übersicht\n");
-    fprintf(stderr, "     e3dcset -l 1                    # EMS Tags anzeigen\n");
-    fprintf(stderr, "     e3dcset -r EMS_POWER_PV         # PV-Leistung abfragen\n");
-    fprintf(stderr, "     e3dcset -r EMS_BAT_SOC -q       # Batterie-SOC (nur Wert)\n");
-    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC         # Batterie-SOC Modul 0\n");
-    fprintf(stderr, "     e3dcset -r BAT_REQ_RSOC -i 1    # Batterie-SOC Modul 1\n");
-    fprintf(stderr, "     e3dcset -r BAT_REQ_ASOC -i 0 -q # SOH Modul 0 (quiet)\n");
-    fprintf(stderr, "     e3dcset -m 0                    # Alle Werte von Modul 0\n");
-    fprintf(stderr, "     e3dcset -m 1                    # Alle Werte von Modul 1\n");
-    fprintf(stderr, "     e3dcset -r 0x01000008           # Mit Hex-Wert\n");
-    fprintf(stderr, "     e3dcset -H day                  # Heutige Tagesdaten\n");
-    fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
-    fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
-    fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
-    fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n\n");
-    exit(EXIT_FAILURE);
-}
-
-void readConfig(void){
-
-    FILE *fp;
-
-    fp = fopen(g_ctx.configPath, "r");
-
-    char var[128], value[128], line[256];
-
-    if(fp) {
-
-        while (fgets(line, sizeof(line), fp)) {
-
-                memset(var, 0, sizeof(var));
-                memset(value, 0, sizeof(value));
-
-                if(sscanf(line, "%[^ \t=]%*[\t ]=%*[\t ]%[^\n]", var, value) == 2) {
-
-                        if(strcmp(var, "MIN_LEISTUNG") == 0)
-                                e3dc_config.MIN_LEISTUNG = atoi(value);
- 
-                        else if(strcmp(var, "MAX_LEISTUNG") == 0)
-                                e3dc_config.MAX_LEISTUNG = atoi(value);
-
-                        else if(strcmp(var, "MIN_LADUNGSMENGE") == 0)
-                                e3dc_config.MIN_LADUNGSMENGE = atoi(value);
-
-                        else if(strcmp(var, "MAX_LADUNGSMENGE") == 0)
-                                e3dc_config.MAX_LADUNGSMENGE = atoi(value);
-
-                        else if(strcmp(var, "server_ip") == 0)
-                                strcpy(e3dc_config.server_ip, value);
-
-                        else if(strcmp(var, "server_port") == 0)
-                                e3dc_config.server_port = atoi(value);
-
-                        else if(strcmp(var, "e3dc_user") == 0)
-                                strcpy(e3dc_config.e3dc_user, value);
-
-                        else if(strcmp(var, "e3dc_password") == 0)
-                                strcpy(e3dc_config.e3dc_password, value);
-
-                        else if(strcmp(var, "aes_password") == 0)
-                                strcpy(e3dc_config.aes_password, value);
-
-                        else if(strcmp(var, "debug") == 0)
-                                debug = atoi(value);
-                }
-            }
-
-        DEBUG(" \n");
-        DEBUG("----------------------------------------------------------\n");
-        DEBUG("Gelesene Parameter aus Konfigurationsdatei %s:\n", g_ctx.configPath);
-        DEBUG("MIN_LEISTUNG=%u\n",e3dc_config.MIN_LEISTUNG);
-        DEBUG("MAX_LEISTUNG=%u\n",e3dc_config.MAX_LEISTUNG);
-        DEBUG("MIN_LADUNGSMENGE=%u\n",e3dc_config.MIN_LADUNGSMENGE);
-        DEBUG("MAX_LADUNGSMENGE=%u\n",e3dc_config.MAX_LADUNGSMENGE);
-        DEBUG("server_ip=%s\n",e3dc_config.server_ip);
-        DEBUG("server_port=%i\n",e3dc_config.server_port);
-        DEBUG("e3dc_user=%s\n", strlen(e3dc_config.e3dc_user) > 0 ? "***@***" : "");
-        DEBUG("e3dc_password=%s\n", strlen(e3dc_config.e3dc_password) > 0 ? "********" : "");
-        DEBUG("aes_password=%s\n", strlen(e3dc_config.aes_password) > 0 ? "********" : "");
-        DEBUG("----------------------------------------------------------\n");
-
-        fclose(fp);
-
-    } else {
-
-        printf("Konfigurationsdatei %s wurde nicht gefunden.\n\n",g_ctx.configPath);
-        exit(EXIT_FAILURE);
-    }
-
-}
-
-void checkArguments(void){
-
-    if (g_ctx.werteAbfragen && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
-        fprintf(stderr, "[-r] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (g_ctx.historieAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.werteAbfragen || g_ctx.setEPReserve)){
-        fprintf(stderr, "[-H] kann nicht zusammen mit [-r], [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (g_ctx.setEPReserve && g_ctx.epReserveWh < 0){
-        fprintf(stderr, "[-E] Notstromreserve muss >= 0 Wh sein\n\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (g_ctx.werteAbfragen && g_ctx.leseTag == 0){
-        fprintf(stderr, "[-r] benoetigt einen gueltigen TAG-Wert (z.B. 0x01000001 oder battery-soc)\n\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (g_ctx.quietMode && !g_ctx.werteAbfragen){
-        fprintf(stderr, "[-q] kann nur zusammen mit [-r] verwendet werden\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (g_ctx.historieDatum && !g_ctx.historieAbfrage){
-        fprintf(stderr, "[-D] kann nur zusammen mit [-H] verwendet werden\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (g_ctx.historieAbfrage && !g_ctx.historieTyp){
-        fprintf(stderr, "[-H] benötigt einen History-Typ (day, week, month, year)\n\n");
-        exit(EXIT_FAILURE);
-    }
-    
-    if (g_ctx.historieAbfrage && !g_ctx.historieDatum){
-        g_ctx.historieDatum = strdup("today");
-    }
-
-    if (g_ctx.ladeLeistungGesetzt && (g_ctx.ladeLeistung < 0 || g_ctx.ladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.ladeLeistung > e3dc_config.MAX_LEISTUNG)){
-        fprintf(stderr, "[-c g_ctx.ladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
-        exit(EXIT_FAILURE);
-    }
-
-    if (g_ctx.entladeLeistungGesetzt && (g_ctx.entladeLeistung < 0 || g_ctx.entladeLeistung < e3dc_config.MIN_LEISTUNG || g_ctx.entladeLeistung > e3dc_config.MAX_LEISTUNG)){
-        fprintf(stderr, "[-d g_ctx.entladeLeistung] muss zwischen %i und %i liegen\n\n", e3dc_config.MIN_LEISTUNG, e3dc_config.MAX_LEISTUNG);
-        exit(EXIT_FAILURE);
-    }
-
-    if (g_ctx.automatischLeistungEinstellen && (g_ctx.entladeLeistung > 0 || g_ctx.ladeLeistung > 0)){
-        fprintf(stderr, "bei Lade/Entladeleistung Automatik [-a] duerfen [-c g_ctx.ladeLeistung] und [-d g_ctx.entladeLeistung] nicht gesetzt sein\n\n");
-        exit(EXIT_FAILURE);
-    }
-
-    if (g_ctx.manuelleSpeicherladung && (g_ctx.ladungsMenge < e3dc_config.MIN_LADUNGSMENGE || g_ctx.ladungsMenge > e3dc_config.MAX_LADUNGSMENGE)){
-        fprintf(stderr, "Fuer die manuelle Speicherladung muss der angegebene Wert zwischen %iWh und %iWh liegen\n\n",e3dc_config.MIN_LADUNGSMENGE,e3dc_config.MAX_LADUNGSMENGE);
-        exit(EXIT_FAILURE);
-    }
-
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve){
-        fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
-        exit(EXIT_FAILURE);
-    }
-
-}
-
-void connectToServer(void){
-
-    DEBUG("Connecting to server %s:%i\n", e3dc_config.server_ip, e3dc_config.server_port);
-
-    iSocket = SocketConnect(e3dc_config.server_ip, e3dc_config.server_port);
-
-    if(iSocket < 0) {
-        printf("Connection failed\n");
-        exit(EXIT_FAILURE);
-    }
-    DEBUG("Connected successfully\n");
-
-    // create AES key and set AES parameters
-    {
-        // initialize AES encryptor and decryptor IV
-        memset(ucDecryptionIV, 0xff, AES_BLOCK_SIZE);
-        memset(ucEncryptionIV, 0xff, AES_BLOCK_SIZE);
-
-        // limit password length to AES_KEY_SIZE
-        int64_t iPasswordLength = strlen(e3dc_config.aes_password);
-        if(iPasswordLength > AES_KEY_SIZE)
-                iPasswordLength = AES_KEY_SIZE;
-
-        // copy up to 32 bytes of AES key password
-        uint8_t ucAesKey[AES_KEY_SIZE];
-        memset(ucAesKey, 0xff, AES_KEY_SIZE);
-        memcpy(ucAesKey, e3dc_config.aes_password, iPasswordLength);
-
-        // set encryptor and decryptor parameters
-        aesDecrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
-        aesEncrypter.SetParameters(AES_KEY_SIZE * 8, AES_BLOCK_SIZE * 8);
-        aesDecrypter.StartDecryption(ucAesKey);
-        aesEncrypter.StartEncryption(ucAesKey);
-    }
-
-}
-
-int main(int argc, char *argv[])
-{
-
-        // Argumente der Kommandozeile parsen
-    
-    if (argc == 1){
-        usage();
-        }
-    
-    int opt;
-
-    while ((opt = getopt(argc, argv, "c:d:e:E:ap:r:i:m:qlt:H:D:I:S:")) != -1) {
-
-        switch (opt) {
-
-        case 'c':
-                g_ctx.leistungAendern = true;
-                g_ctx.ladeLeistungGesetzt = true;
-                g_ctx.ladeLeistung = atoi(optarg);
-                break;
-        case 'd':
-                g_ctx.leistungAendern = true;
-            g_ctx.entladeLeistungGesetzt = true;
-                g_ctx.entladeLeistung = atoi(optarg);
-                break;
-        case 'e':
-                g_ctx.manuelleSpeicherladung = true;
-                g_ctx.ladungsMenge = atoi(optarg);
-                break;
-        case 'E':
-                g_ctx.setEPReserve = true;
-                g_ctx.epReserveWh = (float)atof(optarg);
-                break;
-        case 'a':
-                g_ctx.leistungAendern = true;
-                g_ctx.automatischLeistungEinstellen = true;
-                break;
-        case 'p':
-                g_ctx.configPath = strdup(optarg);
-                break;
-        case 't':
-                g_ctx.tagfilePath = strdup(optarg);
-                break;
-        case 'H':
-                g_ctx.historieAbfrage = true;
-                g_ctx.historieTyp = strdup(optarg);
-                if (strcmp(optarg, "day") != 0 && strcmp(optarg, "week") != 0 &&
-                    strcmp(optarg, "month") != 0 && strcmp(optarg, "year") != 0) {
-                    fprintf(stderr, "Fehler: Ungültiger History-Typ '%s'\n", optarg);
-                    fprintf(stderr, "Gültige Typen: day, week, month, year\n");
-                    exit(EXIT_FAILURE);
-                }
-                break;
-        case 'D':
-                g_ctx.historieDatum = strdup(optarg);
-                break;
-        case 'r':
-                g_ctx.werteAbfragen = true;
-                if (optarg[0] >= '0' && optarg[0] <= '9') {
-                    // Hex-Wert direkt parsen
-                    g_ctx.leseTag = strtoul(optarg, NULL, 0);
-                    // Validierung: Nur REQUEST Tags können abgefragt werden
-                    if (!isRequestTag(g_ctx.leseTag)) {
-                        fprintf(stderr, "Fehler: 0x%08X ist ein RESPONSE Tag!\n", g_ctx.leseTag);
-                        fprintf(stderr, "Sie können nur REQUEST Tags abfragen (zweites Byte < 0x80).\n");
-                        fprintf(stderr, "Beispiel: 0x01000008 (REQUEST), nicht 0x01800008 (RESPONSE)\n");
-                        exit(EXIT_FAILURE);
-                    }
-                } else {
-                    // Tag-Namen speichern für spätere Konvertierung (nach loadTagsFile)
-                    g_ctx.tagName = strdup(optarg);
-                }
-                break;
-        case 'i':
-                g_ctx.batIndex = (uint16_t)atoi(optarg);
-                break;
-        case 'm':
-                g_ctx.modulInfoDump = true;
-                g_ctx.batIndex = (uint16_t)atoi(optarg);
-                break;
-        case 'q':
-                g_ctx.quietMode = true;
-                break;
-        case 'l':
-                g_ctx.listTags = true;
-                // Prüfe nächstes Argument als optional Kategorie
-                if (optind < argc && argv[optind][0] >= '0' && argv[optind][0] <= '9') {
-                    g_ctx.listCategory = atoi(argv[optind]);
-                    optind++;  // Skip this argument
-                    if (g_ctx.listCategory < 1 || g_ctx.listCategory > 8) {
-                        fprintf(stderr, "Fehler: Ungültige Kategorie %d (gültig: 1-8)\n", g_ctx.listCategory);
-                        fprintf(stderr, "Beispiel: ./e3dcset -l    (Übersicht)\n");
-                        fprintf(stderr, "         ./e3dcset -l 1  (EMS Tags)\n\n");
-                        usage();
-                    }
-                } else {
-                    // Keine Kategorie angegeben → Übersicht
-                    g_ctx.listCategory = 0;
-                }
-                break;
-                default:
-                usage();
-
-        }
-    }
-
-    if (optind < argc){
-        usage();
-    }
-
-    // Lade Tag-Definitionen aus Datei VOR dem -l Check
-    loadTagsFile(g_ctx.tagfilePath);
-
-    // Handle -l option early (no device connection needed)
-    if (g_ctx.listTags) {
-        printTagList(g_ctx.listCategory);
-        return 0;
-    }
-    
-    // Konvertiere Tag-Namen zu Hex-Wert (nach loadTagsFile)
-    if (g_ctx.werteAbfragen && g_ctx.tagName != NULL) {
-        g_ctx.leseTag = getTagByName(g_ctx.tagName);
-        // Validierung: Nur REQUEST Tags können abgefragt werden
-        if (!isRequestTag(g_ctx.leseTag)) {
-            fprintf(stderr, "Fehler: 0x%08X ist ein RESPONSE Tag!\n", g_ctx.leseTag);
-            fprintf(stderr, "Sie können nur REQUEST Tags abfragen (zweites Byte < 0x80).\n");
-            fprintf(stderr, "Beispiel: 0x01000008 (REQUEST), nicht 0x01800008 (RESPONSE)\n");
-            exit(EXIT_FAILURE);
-        }
-        free(g_ctx.tagName);
-        g_ctx.tagName = NULL;
-    }
-
-    // Lese Konfigurationsdatei
-    readConfig();
-
-    // Argumente der Kommandozeile plausibilisieren
-    checkArguments();
-
-    // Verbinde mit Hauskraftwerk
-    connectToServer();
-
-    // Starte Sende- / Empfangsschleife
-    mainLoop();
-
-    // Trenne Verbindung zum Hauskraftwerk
-    SocketClose(iSocket);
-    
-    DEBUG("Ende!\n\n");
-
-    return 0;
-}
 

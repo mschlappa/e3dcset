@@ -1,0 +1,167 @@
+# e3dcset Configuration File
+# ===========================
+# 
+# WICHTIG: Diese Datei enthält Passwörter im Klartext!
+# Berechtigungen setzen: chmod 600 e3dcset.config
+#
+# Kopiere diese Datei nach "e3dcset.config" und fülle deine Werte ein:
+#   cp e3dcset.config.example e3dcset.config
+#   nano e3dcset.config
+#   chmod 600 e3dcset.config
+#
+# Alle Werte können auch via Environment-Variablen gesetzt werden:
+#   export E3DC_USER="deine_email@beispiel.de"
+#   export E3DC_PASSWORD="dein_passwort"
+#   export E3DC_AES_PASSWORD="dein_rscp_passwort"
+#   export E3DC_SERVER_IP="192.168.1.100"
+#   export E3DC_SERVER_PORT="5033"
+#
+# Environment-Variablen ÜBERSCHREIBEN Werte aus dieser Datei!
+
+
+# ============================================================================
+# VERBINDUNGSEINSTELLUNGEN (PFLICHT)
+# ============================================================================
+
+# IP-Adresse deines E3DC S10 Hauskraftwerks
+# Finden: E3DC-Portal → System → Netzwerk
+#         Router-Webinterface (DHCP-Leases)
+#         nmap 192.168.1.0/24 -p 5033
+server_ip=192.168.1.100
+
+# RSCP-Port (Standard: 5033, normalerweise nicht ändern)
+server_port=5033
+
+
+# ============================================================================
+# AUTHENTIFIZIERUNG (PFLICHT)
+# ============================================================================
+
+# E3DC-Portal Benutzername (Email-Adresse)
+# WICHTIG: Muss mit dem Portal-Account übereinstimmen!
+e3dc_user=deine_email@beispiel.de
+
+# E3DC-Portal Passwort
+# Bei Sonderzeichen in Quotes setzen: e3dc_password="Pass!wort$123"
+e3dc_password=dein_portal_passwort
+
+# RSCP-Passwort (für AES-256-Verschlüsselung)
+# WICHTIG: Das RSCP-Passwort ist MEIST UNTERSCHIEDLICH vom Portal-Passwort!
+# Finden: E3DC-Portal → Einstellungen → Personalisierung → RSCP-Passwort
+aes_password=dein_rscp_passwort
+
+
+# ============================================================================
+# ERWEITERTE EINSTELLUNGEN (OPTIONAL)
+# ============================================================================
+
+# Socket-Timeout in Sekunden (Standard: 10)
+# Empfehlungen:
+#   - Normale Abfragen: 3-5 Sekunden
+#   - Historische Daten: 10-15 Sekunden
+#   - Langsame Netzwerke: 20 Sekunden
+timeout_seconds=10
+
+# Maximale Anzahl Verbindungsversuche bei Fehler (Standard: 3)
+# Bei instabilen Netzwerken höher setzen (z.B. 5)
+max_retries=3
+
+# Debug-Modus (Standard: 0)
+# 0 = Debug aus
+# 1 = Debug an (detaillierte Logging-Ausgaben)
+#
+# Debug-Ausgabe zeigt:
+#   - Verbindungsdetails
+#   - RSCP-Protokoll-Kommunikation
+#   - AES-Verschlüsselung/Entschlüsselung
+#   - Request/Response-Daten
+#
+# Nutzen bei:
+#   - Verbindungsproblemen
+#   - RSCP-Protokoll-Debugging
+#   - Performance-Problemen
+debug=0
+
+
+# ============================================================================
+# BEISPIELE FÜR SPEZIELLE SZENARIEN
+# ============================================================================
+
+# Schnelle Abfragen (geringe Latenz, stabile Verbindung)
+# timeout_seconds=3
+# max_retries=1
+
+# Langsame Netzwerke / WiFi (erhöhte Timeouts, mehr Retries)
+# timeout_seconds=20
+# max_retries=5
+
+# Debug bei Problemen (maximale Ausgaben)
+# debug=1
+# timeout_seconds=30
+
+# Passwörter mit Sonderzeichen (in Quotes setzen)
+# e3dc_password="Mein!Passwort#2024$"
+# aes_password="RSCP@Passwort&123"
+
+
+# ============================================================================
+# SICHERHEITSHINWEISE
+# ============================================================================
+
+# ⚠️ KRITISCH: Diese Datei enthält Passwörter im Klartext!
+#
+# Empfohlene Sicherheitsmaßnahmen:
+#
+# 1. Berechtigungen auf nur-Owner setzen:
+#    chmod 600 e3dcset.config
+#
+# 2. Besitzer prüfen:
+#    ls -l e3dcset.config
+#    # Sollte zeigen: -rw------- 1 user user
+#
+# 3. Nicht in Git committen:
+#    echo "e3dcset.config" >> .gitignore
+#
+# 4. Für Docker/CI/CD: Environment-Variablen nutzen statt Config-Datei
+#    export E3DC_USER="..."
+#    export E3DC_PASSWORD="..."
+#    export E3DC_AES_PASSWORD="..."
+#
+# 5. Regelmäßig Passwörter ändern (E3DC-Portal)
+
+
+# ============================================================================
+# ALTERNATIVE: ENVIRONMENT-VARIABLEN
+# ============================================================================
+
+# Für sicherere Setups (Docker, Kubernetes, CI/CD):
+#
+# export E3DC_USER="deine_email@beispiel.de"
+# export E3DC_PASSWORD="dein_portal_passwort"
+# export E3DC_AES_PASSWORD="dein_rscp_passwort"
+# export E3DC_SERVER_IP="192.168.1.100"
+# export E3DC_SERVER_PORT="5033"
+#
+# Environment-Variablen überschreiben Config-Datei-Werte!
+#
+# Nutzen:
+#   - Keine Datei-Berechtigungen nötig
+#   - Secrets aus Secret-Manager (Kubernetes Secrets, AWS Secrets Manager, etc.)
+#   - Kein Risiko von versehentlichem Git-Commit
+#
+# Dokumentation: docs/CONFIGURATION.md
+
+
+# ============================================================================
+# WEITERE INFORMATIONEN
+# ============================================================================
+
+# Vollständige Dokumentation:
+#   - docs/USAGE.md           – CLI-Nutzung, alle Flags & Beispiele
+#   - docs/CONFIGURATION.md   – Detaillierte Config-Anleitung
+#   - docs/BUILDING.md        – Build-Anleitung
+#   - docs/ARCHITECTURE.md    – Code-Struktur
+#
+# Support:
+#   - README.md               – Projekt-Übersicht
+#   - GitHub Issues           – Bug-Reports, Feature-Requests

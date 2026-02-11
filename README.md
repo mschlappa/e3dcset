@@ -1,526 +1,179 @@
 # e3dcset - E3DC S10 Steuerung & Überwachung
 
-Ein leistungsstarkes Linux-Kommandozeilen-Tool zur Steuerung und Überwachung von E3DC S10 Hauskraftwerken über das RSCP-Protokoll. Abfragen von Echtzeit-Werten, Batterie-Verwaltung und Analyse historischer Energiedaten.
+![Build](https://github.com/jarvis-schlappa/e3dcset/actions/workflows/build.yml/badge.svg)
 
-## Funktionen
+Ein leistungsstarkes Kommandozeilen-Tool zur Steuerung und Überwachung von E3DC S10 Hauskraftwerken über das RSCP-Protokoll.
 
-✨ **Leistungsmanagement**
-- Batterie-Lade-/Entladeleistung einstellen
-- Wechsel zum automatischen Leistungsmanagement
-- Manuelle Batterie-Ladung mit spezifischer Energiemenge starten/stoppen
-- Notstromreserve setzen (Workaround für Netzladung)
+**Funktionen:**
+- ⚡ Batterie-Lade-/Entladeleistung steuern
+- 📊 Echtzeit-Werte von RSCP-Tags abfragen (inkl. JSON-Output)
+- 📈 Historische Energiedaten analysieren (Tag/Woche/Monat/Jahr)
+- 🔋 Batterie-Gesundheit überwachen (SOC, SOH, Ladezyklen)
+- 🏷️ Dynamisches Tag-Management über externe Konfigurationsdatei
 
-📊 **Daten-Abfragen**
-- Echtzeit-Werte von beliebigen RSCP-Tags abfragen
-- Nach Tag-Name oder Hex-Wert suchen
-- Quiet-Mode für Skriptierung und Automatisierung
+---
 
-📈 **Historische Datenanalyse**
-- Abfrage aggregierter Energiedaten für Tag/Woche/Monat/Jahr
-- Automatische Sampling-Optimierung pro Zeitraum
-- Energiesummen mit Autarkie- und Eigenverbrauchsmetriken
-- Flexible Datumsauswahl (YYYY-MM-DD oder 'today')
-
-🏷️ **Dynamisches Tag-Management**
-- Lade Tag-Definitionen aus externer Konfigurationsdatei
-- Unterstützung für benutzerdefinierte Tag-Beschreibungen und Interpretationen
-- Keine Neukompilierung für neue Tags erforderlich
-
-## Schnelleinstieg
+## Schnellstart
 
 ### Installation
 
-Repository klonen:
 ```bash
-git clone https://github.com/mschlappa/e3dcset.git
+# Repository klonen
+git clone https://github.com/jarvis-schlappa/e3dcset.git
 cd e3dcset
-```
 
-Deine E3DC-System-Zugangsdaten in `e3dcset.config` konfigurieren:
-```bash
+# Konfiguration erstellen (siehe e3dcset.config.example)
+cp e3dcset.config.example e3dcset.config
 nano e3dcset.config
-```
+chmod 600 e3dcset.config
 
-Diese Einstellungen aktualisieren:
-```
-server_ip=192.168.1.100
-server_port=5033
-e3dc_user=deine_email@beispiel.de
-e3dc_password=dein_passwort
-aes_password=dein_rscp_passwort
-debug=0
-```
-
-Tool kompilieren:
-```bash
+# Kompilieren
 make
 ```
 
 ### Erste Schritte
 
-Aktuellen Batterie-Status prüfen:
 ```bash
+# Batterie-Ladezustand prüfen
 ./e3dcset -r EMS_BAT_SOC
-# Ausgabe: Tag 0x01000008: 85
-```
 
-Heutige Energieproduktion anzeigen:
-```bash
+# Heutige PV-Produktion anzeigen
 ./e3dcset -H day
-# Ausgabe: Zeitraum: 21.11.2025 - 21.11.2025
-#          PV-Produktion: 15.76 kWh
-#          ...
-```
 
-## Nutzungsanleitung
-
-### Leistungssteuerungs-Befehle
-
-Batterie auf 2000W Laden stellen (Entladen blockieren):
-```bash
+# Batterie auf 2000W laden, Entladung blockieren
 ./e3dcset -c 2000 -d 1
-```
 
-Batterie auf 2400W Laden und 500W Entladen stellen:
-```bash
-./e3dcset -c 2400 -d 500
-```
-
-Zurück zu automatischem Leistungsmanagement:
-```bash
+# Zurück zu automatischem Modus
 ./e3dcset -a
 ```
 
-Manuelles Laden mit 5kWh bei 2400W starten:
-```bash
-./e3dcset -c 2400 -d 1 -e 5000
-```
-
-Laufendes manuelles Laden stoppen:
-```bash
-./e3dcset -e 0
-```
-
-### Notstromreserve setzen (Workaround für Netzladung)
-
-Da das manuelle Laden (`-e`) nur bedingt zuverlässig funktioniert, kann über die Notstromreserve eine Netzladung erzwungen werden. Das E3DC lädt die Batterie automatisch aus dem Netz, bis die Reserve erreicht ist.
-
-Notstromreserve auf 3000 Wh setzen:
-```bash
-./e3dcset -E 3000
-```
-
-Notstromreserve deaktivieren:
-```bash
-./e3dcset -E 0
-```
-
-### Echtzeit-Werte abfragen
-
-Batterie-Ladezustand (SOC) abfragen:
-```bash
-./e3dcset -r EMS_BAT_SOC
-```
-
-**Batterie-Gesundheitsüberwachung:**
-```bash
-# Relativer Ladezustand (Portal-Anzeige, 0-100%)
-./e3dcset -r BAT_REQ_RSOC
-
-# Absoluter SOC / State of Health (Batterie-Gesundheit, %)
-./e3dcset -r BAT_REQ_ASOC
-
-# Anzahl Ladezyklen
-./e3dcset -r BAT_REQ_CHARGE_CYCLES
-
-# Batterie-Strom und Spannung
-./e3dcset -r BAT_REQ_CURRENT
-./e3dcset -r BAT_REQ_MODULE_VOLTAGE
-```
-
-**Hinweis:** Die `BAT_REQ_*` Tags nutzen automatisch den BAT_REQ_DATA Container - das Tool kümmert sich um die korrekte Anfrage-Struktur.
-
-**Multi-Batterie-Systeme:**
-
-Wenn Ihr E3DC System mehrere Batterie-Module hat, können Sie mit dem `-i` Parameter das gewünschte Modul auswählen:
+### JSON-Output für Automatisierung
 
 ```bash
-# Standard: Erstes Modul (Index 0)
-./e3dcset -r BAT_REQ_RSOC              # Modul 0
+# Strukturierte Daten ausgeben (NDJSON – ein JSON-Objekt pro Zeile)
+./e3dcset -r EMS_BAT_SOC -j
+# Output: {"tag":"EMS_BAT_SOC","hex":"0x01000008","value":85,"unit":"%"}
 
-# Zweites Modul abfragen (Index 1)
-./e3dcset -r BAT_REQ_RSOC -i 1         # Modul 1
+# System-Informationen als JSON
+./e3dcset --info -j
 
-# Drittes Modul (Index 2)
-./e3dcset -r BAT_REQ_ASOC -i 2         # Modul 2
-
-# Alle Module im Script abfragen
-for i in 0 1 2; do
-  echo "Modul $i SOH: $(./e3dcset -r BAT_REQ_ASOC -i $i -q)%"
-done
+# Mit jq verarbeiten
+POWER=$(./e3dcset -r EMS_POWER_PV -j | jq -r '.value')
+echo "PV-Leistung: ${POWER}W"
 ```
 
-**Alle Werte eines Moduls auf einmal anzeigen (inkl. ALLE DCB-Zellblöcke):**
-
-Mit der `-m` Option können Sie alle wichtigen Werte eines Batterie-Moduls **inklusive aller DCB-Module** in einer übersichtlichen Ausgabe erhalten:
+### System-Informationen
 
 ```bash
-# Alle Werte von Modul 0 (inkl. alle DCBs)
-./e3dcset -m 0
-
-# Ausgabe (Beispiel mit 2 DCB-Modulen):
-Batterie Modul 0:
-  Relativer SOC (Portal-Anzeige):  85.50 %
-  Absoluter SOC / State of Health: 98.20 %
-  Anzahl Ladezyklen:               234
-  Batterie-Strom:                  -12.50 A
-  Modulspannung:                   51.20 V
-  Max. Batteriespannung:           58.80 V
-  Batterie-Statuscode:             0
-  Fehler-Code:                     0
-  Anzahl DCB-Module:               2
-
-  === DCB Zellblöcke ===
-  Zellblock 0:
-    State of Health (SOH):         48.90 %
-    Ladezyklen:                    1774
-    Strom:                         -2.50 A
-    Spannung:                      51.20 V
-    Volle Ladekapazität:           96.50 Ah
-    Verbleibende Kapazität:        47.20 Ah
-    ...
-
-  Zellblock 1:
-    State of Health (SOH):         84.90 %
-    Ladezyklen:                    1557
-    Strom:                         -2.48 A
-    Spannung:                      51.18 V
-    Volle Ladekapazität:           96.80 Ah
-    Verbleibende Kapazität:        82.20 Ah
-    ...
+# SW-Version, Seriennummer, Produktionsdatum
+./e3dcset --info
 ```
 
-**NEU:** Das Tool fragt automatisch **alle DCB-Module** ab und zeigt deren detaillierte Informationen an:
-- State of Health (SOH) pro DCB
-- Ladezyklen pro DCB
-- Strom/Spannung pro DCB
-- Kapazitätsdaten pro DCB
-
-Dies ermöglicht die **Überwachung der Gesundheit einzelner Batterie-Zellblöcke**, insbesondere nützlich bei:
-- Systemen mit unterschiedlich alten DCB-Modulen
-- Erkennung von degradierten Zellblöcken
-- Präzise Batterie-Zustandsüberwachung
-
-PV-Produktionsleistung abfragen:
-```bash
-./e3dcset -r EMS_POWER_PV
-```
-
-Mit direktem Hex-Wert abfragen:
-```bash
-./e3dcset -r 0x01000001
-```
-
-Mit Quiet-Mode abfragen (für Skripte):
-```bash
-SOC=$(./e3dcset -r EMS_BAT_SOC -q)
-RSOC=$(./e3dcset -r BAT_REQ_RSOC -q)
-ASOC=$(./e3dcset -r BAT_REQ_ASOC -q)
-```
-
-### Verfügbare Tags durchsuchen
-
-Alle Tag-Kategorien anzeigen:
-```bash
-./e3dcset -l
-```
-
-EMS (Energiemanagementsystem) Tags auflisten:
-```bash
-./e3dcset -l 1
-```
-
-Batterie-Tags auflisten:
-```bash
-./e3dcset -l 2
-```
-
-**Kategorien-Übersicht:**
-| ID | Kategorie | Beschreibung |
-|---|---|---|
-| 1 | EMS | Energiemanagementsystem |
-| 2 | BAT | Batterie |
-| 3 | PVI | PV-Wechselrichter |
-| 4 | PM | Leistungsmesser |
-| 5 | WB | Wallbox / EV-Lader |
-| 6 | DCDC | DC/DC-Wandler |
-| 7 | INFO | Systeminformationen |
-| 8 | DB | Datenbank (Geschichte) |
-
-### Historische Datenabfragen
-
-Heutige Energiesumme abfragen (24h, 15-Minuten-Intervalle):
-```bash
-./e3dcset -H day
-```
-
-Diese Woche Energiesumme abfragen (7 Tage, 1-Stunden-Intervalle):
-```bash
-./e3dcset -H week
-```
-
-Aktueller Monat Energiesumme abfragen (30 Tage, tägliche Intervalle):
-```bash
-./e3dcset -H month
-```
-
-Aktuelles Jahr Energiesumme abfragen (365 Tage, wöchentliche Intervalle):
-```bash
-./e3dcset -H year
-```
-
-Historische Daten von einem bestimmten Datum abfragen:
-```bash
-./e3dcset -H day -D 2024-11-20
-./e3dcset -H week -D 2024-11-15
-./e3dcset -H month -D 2024-10-01
-./e3dcset -H year -D 2023-01-01
-```
-
-**Ausgabe-Beispiel:**
-```
-Zeitraum: 17.11.2025 - 23.11.2025
-PV-Produktion:      43.92 kWh
-Batterie geladen:   21.86 kWh
-Batterie entladen:  15.35 kWh
-Netzbezug:          126.65 kWh
-Netzeinspeisung:    6.17 kWh
-Hausverbrauch:      152.91 kWh
-Autarkie:           17.2 %
-```
-
-## Befehlsreferenz
-
-```
-Verwendung: e3dcset [-c Ladeleistung] [-d Entladeleistung] [-e Energiemenge] [-a] 
-                    [-r TAG_NAME] [-q] [-l [kategorie]] [-H typ] [-D datum]
-                    [-p config_pfad] [-t tags_pfad]
-
-Leistungssteuerung:
-  -c <watt>     Ladeleistung einstellen (Watt)
-  -d <watt>     Entladeleistung einstellen (Watt, 1 = deaktiviert)
-  -e <wh>       Manuelles Laden mit Energiemenge starten (Wh, 0 = stoppen)
-  -E <wh>       Notstromreserve setzen (Wh, 0 = deaktivieren)
-  -a            Zurück zu automatischem Leistungsmanagement
-
-Daten-Abfragen:
-  -r <tag>      RSCP-Tag-Wert abfragen (Name oder Hex wie 0x01000001)
-  -i <index>    Batterie-Modul Index für BAT_REQ_* Tags (Standard: 0)
-  -m <index>    Alle Werte eines Batterie-Moduls anzeigen
-  -q            Quiet-Mode - nur Wert ausgeben (für Skriptierung)
-  -l [kat]      Tags nach Kategorie auflisten (1-8, kein Argument = Übersicht)
-
-Historische Daten:
-  -H <typ>      Historische Daten abfragen (day|week|month|year)
-  -D <datum>    Datum angeben: YYYY-MM-DD oder 'today' (Standard: today)
-
-Konfiguration:
-  -p <pfad>     Benutzerdefinierten Config-Pfad angeben (Standard: e3dcset.config)
-  -t <pfad>     Benutzerdefinierten Tags-Pfad angeben (Standard: e3dcset.tags)
-```
-
-### Wichtige Einschränkungen
-
-- `-r` kann nicht mit `-c`, `-d`, `-e`, `-E`, `-a` oder `-H` kombiniert werden
-- `-H` kann nicht mit `-r`, `-c`, `-d`, `-e`, `-E` oder `-a` kombiniert werden
-- `-q` kann nur mit `-r` verwendet werden
-- `-D` kann nur mit `-H` verwendet werden
-- Nur REQUEST-Tags können abgefragt werden (zweites Byte < 0x80)
-
-## Tag-Management
-
-### Format der Tag-Definitionsdatei
-
-Erstelle benutzerdefinierte Tag-Definitionen in `e3dcset.tags`:
-
-```
-# Kommentare beginnen mit #
-
-[EMS]
-TAG_NAME = 0xHEXVALUE # Beschreibung
-
-[BAT]
-TAG_NAME = 0xHEXVALUE # Beschreibung
-
-[INTERPRETATIONS]
-0xHEXVALUE:WERT = Interpretationstext
-```
-
-### Beispielkonfiguration
-
-```
-[EMS]
-EMS_POWER_PV = 0x01000001 # PV-Leistung in Watt
-EMS_BAT_SOC = 0x01000008 # Batterie-Ladezustand in Prozent
-
-[INTERPRETATIONS]
-0x01000011:0 = Normal/Automatik
-0x01000011:1 = Leerlauf
-0x01000011:2 = Entladung
-0x01000011:3 = Ladung
-0x01000011:4 = Netzladung
-```
-
-Benutzerdefinierte Tags-Datei verwenden:
-```bash
-./e3dcset -l -t /pfad/zu/custom.tags
-./e3dcset -r EMS_POWER_PV -t /pfad/zu/custom.tags
-```
-
-## Skriptierungsbeispiele
-
-### Batterie-Überwachung und automatisches Laden
+### History-Rohdaten (CSV)
 
 ```bash
-#!/bin/bash
-SOC=$(./e3dcset -r EMS_BAT_SOC -q)
-echo "Batterie: ${SOC}%"
-
-if [ $(echo "$SOC < 30" | bc) -eq 1 ]; then
-    echo "Lade mit 3000W..."
-    ./e3dcset -c 3000 -d 1
-fi
+# 15-Minuten-Einzelwerte als CSV
+./e3dcset -H day --raw
+./e3dcset -H day -D 2024-11-20 --raw
 ```
-
-### Täglicher Energiebericht
-
-```bash
-#!/bin/bash
-echo "=== Täglicher Energiebericht ==="
-./e3dcset -H day
-```
-
-### Wöchentliche Analyse
-
-```bash
-#!/bin/bash
-echo "=== Wöchentliche Zusammenfassung ==="
-./e3dcset -H week
-
-echo ""
-echo "=== Monatliche Zusammenfassung ==="
-./e3dcset -H month
-```
-
-### System-Gesundheitsprüfung
-
-```bash
-#!/bin/bash
-echo "EMS-Modus:"
-./e3dcset -r EMS_MODE
-
-echo ""
-echo "PV-Status:"
-./e3dcset -r PVI_ON_GRID
-
-echo ""
-echo "Batterie:"
-./e3dcset -r EMS_BAT_SOC -q | xargs -I {} echo "SOC: {}%"
-```
-
-## Fehlerbehebung
-
-### Verbindungsprobleme
-
-**Fehler: "Connection refused"**
-- Verifiziere IP-Adresse und Port in `e3dcset.config`
-- Prüfe Netzwerkverbindung zum E3DC-System
-- Stelle sicher, dass die Firewall TCP 5033 erlaubt
-
-### Tag-Fehler
-
-**Fehler: "RESPONSE Tag"**
-- Nur REQUEST-Tags können abgefragt werden (zweites Byte < 0x80)
-- Gültiger Bereich: `0x01xxxxxx` bis `0x08xxxxxx`
-- Verwende `-l` um gültige Tags zu finden
-
-**Fehler: "Tag not found"**
-- Verifiziere Tag-Name oder Hex-Wert
-- Prüfe, dass Tags-Datei existiert und geladen wird
-- Verwende `-l 1` bis `-l 8` um verfügbare Tags zu durchsuchen
-
-### Historische Daten
-
-**Keine historischen Daten zurückgegeben:**
-- Verifiziere, dass das E3DC-System historische Daten hat
-- Prüfe Datumsformat: muss YYYY-MM-DD sein
-- Stelle sicher, dass das Datum im verfügbaren Datenbereich liegt
-- Die meisten Systeme haben Daten von mehreren Wochen/Monaten zurück
-
-## Projektstruktur
-
-```
-e3dcset/
-├── e3dcset.cpp              # Hauptprogramm & CLI
-├── e3dcset.config           # Konfiguration (Zugangsdaten, Limits)
-├── e3dcset.tags             # Tag-Definitionen & Interpretationen
-├── RscpProtocol.cpp/.h      # RSCP-Protokoll-Implementierung
-├── SocketConnection.cpp/.h  # Netzwerkkommunikation
-├── AES.cpp/.h               # AES-256-Verschlüsselung
-├── RscpTags.h               # Protokoll-Tag-Konstanten
-├── RscpTypes.h              # Protokoll-Datentyp-Definitionen
-├── Makefile                 # Build-Konfiguration
-└── README.md                # Diese Datei
-```
-
-## Technische Details
-
-### RSCP-Protokoll
-
-Die Kommunikation mit E3DC-Systemen verwendet das RSCP (RES Charge Protocol):
-- Verschlüsselte TCP-Verbindung auf Port 5033
-- AES-256-Verschlüsselung für Datensicherheit
-- Request/Response-Container-Architektur
-- Automatische Geräte-Authentifizierung
-
-### Datensammlung Verlauf
-
-Das System sammelt aggregierte Energiedaten in verschiedenen Intervallen:
-
-| Zeitraum | Dauer | Intervall | Granularität |
-|----------|-------|-----------|--------------|
-| Tag | 24 Stunden | 15 min | Stündliche Details verfügbar |
-| Woche | 7 Tage | 1 Stunde | Tägliche Summaries |
-| Monat | 30 Tage | 1 Tag | Wöchentliche Muster |
-| Jahr | 365 Tage | 1 Woche | Saisonale Trends |
-
-Alle Werte werden in Gesamtenergie (kWh) plus Effizienzkennzahlen (Autarkie %, Eigenverbrauch %) aggregiert.
-
-## Kompatibilität
-
-- **Zielsystem**: E3DC S10
-- **Protokoll**: RSCP (RES Charge Protocol kompatibel)
-- **OS**: Linux (Raspberry Pi, Debian, Ubuntu, etc.)
-- **Compiler**: g++ (C++11 oder später)
-
-## Lizenz
-
-Dieses Projekt respektiert das geistige Eigentum von E3DC. Für kommerzielle Nutzung oder Vertrieb konsultiere E3DC.
-
-## Danksagungen
-
-Basiert auf der E3DC RSCP-Protokoll-Dokumentation und Beispielen. Weitere Entwicklung inspiriert durch Community-Beiträge.
-
-## Unterstützung
-
-Bei Fragen oder Problemen:
-1. Prüfe den [Fehlerbehebung](#fehlerbehebung)-Bereich
-2. Verifiziere deine Konfigurationsdatei-Einstellungen
-3. Überprüfe verfügbare Tags mit `-l`
-4. Aktiviere Debug-Mode in der Konfigurationsdatei für detaillierte Logs
 
 ---
 
-**Version**: 2.1  
-**Zuletzt aktualisiert**: 28.12.2025  
-**Betreut**: Community-gesteuert
+## Dokumentation
+
+📖 **Vollständige Dokumentation:**
+- **[USAGE.md](docs/USAGE.md)** – CLI-Referenz, alle Flags & Beispiele
+- **[CONFIGURATION.md](docs/CONFIGURATION.md)** – Config-Format, Umgebungsvariablen
+- **[BUILDING.md](docs/BUILDING.md)** – Build-Anleitung, Tests, Plattformen
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** – Code-Struktur, Module
+- **[CHANGELOG.md](docs/CHANGELOG.md)** – Versionshistorie
+
+---
+
+## Befehlsübersicht
+
+```
+Leistungssteuerung:
+  -c <watt>     Ladeleistung setzen
+  -d <watt>     Entladeleistung setzen (1 = blockiert)
+  -e <wh>       Manuelles Laden mit Energiemenge (0 = stoppen)
+  -E <wh>       Notstromreserve setzen (0 = deaktivieren)
+  -a            Automatisches Leistungsmanagement
+
+Datenabfragen:
+  -r <tag>      RSCP-Tag abfragen (Name oder Hex)
+  -b <index>    Device-Index für BAT/PVI Container-Tags (Standard: 0)
+  -m <index>    Alle Werte eines Batterie-Moduls inkl. DCBs
+  -q            Quiet-Mode (nur Wert ausgeben)
+  -j            JSON/NDJSON-Output
+  --info        System-Informationen (SW-Version, Seriennummer, Produktionsdatum)
+  -l [kat]      Tags auflisten (1-8)
+  -w            Watch-Mode (kontinuierliche Überwachung)
+  --interval    Watch-Intervall in Sekunden (Standard: 5)
+
+Historische Daten:
+  -H <typ>      History abfragen (day|week|month|year)
+  -D <datum>    Datum angeben (YYYY-MM-DD, Standard: today)
+  --raw         CSV-Ausgabe der History-Einzelwerte (nur mit -H)
+
+Allgemein:
+  -h, --help    Hilfe anzeigen
+  -p <pfad>     Config-Pfad (Standard: e3dcset.config)
+  -t <pfad>     Tags-Pfad (Standard: e3dcset.tags)
+```
+
+Siehe [USAGE.md](docs/USAGE.md) für Details und Beispiele.
+
+---
+
+## Beispiele
+
+**Batterie-Gesundheit überwachen:**
+```bash
+./e3dcset -r BAT_REQ_RSOC         # Relativer SOC (Portal-Anzeige)
+./e3dcset -r BAT_REQ_ASOC         # State of Health
+./e3dcset -r BAT_REQ_CHARGE_CYCLES # Ladezyklen
+./e3dcset -m 0                     # Alle Werte inkl. DCB-Module
+```
+
+**Historische Daten:**
+```bash
+./e3dcset -H day                   # Heute
+./e3dcset -H week -D 2024-11-15    # Bestimmte Woche
+./e3dcset -H month -j              # Monat als JSON
+```
+
+**Skriptierung:**
+```bash
+SOC=$(./e3dcset -r EMS_BAT_SOC -q)
+if [ $SOC -lt 30 ]; then
+  ./e3dcset -c 3000 -d 1  # Batterie laden
+fi
+```
+
+---
+
+## Kompatibilität
+
+- **System:** E3DC S10 Hauskraftwerke
+- **Protokoll:** RSCP (AES-256-verschlüsselt)
+- **OS:** Linux (Debian, Ubuntu, Raspberry Pi), macOS
+- **Compiler:** g++ (C++11 oder neuer)
+
+---
+
+## Support & Entwicklung
+
+- **Tests:** `make test`
+- **Build:** `make clean && make`
+- **Debug:** `debug=1` in Config-Datei setzen
+
+Bei Problemen siehe [USAGE.md – Fehlerbehebung](docs/USAGE.md#fehlerbehebung).
+
+---
+
+**Version:** 2.2  
+**Lizenz:** Siehe [LICENSE](LICENSE)  
+**Maintainer:** Community-driven
+
+**Basiert auf:** E3DC RSCP-Protokoll-Dokumentation

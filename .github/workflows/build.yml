@@ -1,0 +1,56 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Build with ${{ matrix.compiler }}
+      run: |
+        CXX=${{ matrix.compiler }} make clean
+        CXX=${{ matrix.compiler }} CXXFLAGS="-Wall -Wextra" make
+    
+    - name: Check binary exists
+      run: |
+        test -f e3dcset
+        file e3dcset
+        ldd e3dcset || true
+    
+    - name: Run tests
+      run: make test
+
+  build-macos:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Build with clang (macOS default)
+      run: |
+        make clean
+        CXX=clang++ CXXFLAGS="-Wall -Wextra" make
+    
+    - name: Check binary exists
+      run: |
+        test -f e3dcset
+        file e3dcset
+        otool -L e3dcset || true
+    
+    - name: Run tests
+      run: make test

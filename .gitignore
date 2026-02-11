@@ -1,18 +1,17 @@
 # Build artifacts
 e3dcset
-*.o
-*.a
-*.so
-*.dylib
+src/*.o
+src/*.d
 
-# IDE & Editor files
+# Test binaries
+tests/test_config
+tests/test_safe_string
+tests/test_validation
+tests/run_tests
+
+# IDE / Editor
 .vscode/
-.idea/
 *.swp
 *.swo
 *~
 .DS_Store
-
-# Replit project metadata
-.replit
-replit.md

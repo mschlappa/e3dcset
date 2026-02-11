@@ -5,12 +5,17 @@
  *      Author: dikirile
  */
 
+#ifdef __APPLE__
+#include <stdlib.h>
+#else
 #include <malloc.h>
+#endif
 #include <sys/time.h>
 #ifdef WINNT
 #include <windows.h>
 #endif
 #include "RscpProtocol.h"
+#include "constants.h"
 
 
 RscpProtocol::RscpProtocol() {
@@ -26,27 +31,27 @@ bool RscpProtocol::setHeaderTimestamp(SRscpFrame *frame) {
 	}
 
 	bool bTimeSet = false;
-#if defined(__linux__)
-	// get linux timestamp
+#if defined(__linux__) || defined(__APPLE__)
+	// get linux/macOS timestamp
 	struct timeval timeVal;
 	gettimeofday(&timeVal, NULL);
 	// set frame timestamp
 	frame->header.timestamp.seconds = timeVal.tv_sec;
-	frame->header.timestamp.nanoseconds = timeVal.tv_usec * 1000;
+	frame->header.timestamp.nanoseconds = timeVal.tv_usec * MICROSECONDS_TO_NANOSECONDS;
 #elif defined(WINNT)
 	// calculate timestamp in nano seconds
 	FILETIME ftNow;
 	GetSystemTimeAsFileTime(&ftNow);
 	uint64_t u64Now = (uint64_t)ftNow.dwLowDateTime | ((uint64_t)(ftNow.dwHighDateTime) << 32ULL);
-	u64Now = (u64Now - 116444736000000000ULL) * 100;
+	u64Now = (u64Now - WINDOWS_FILETIME_TO_UNIX_EPOCH) * WINDOWS_FILETIME_UNIT_CONVERSION;
 	// set frame timestamp
-	frame->header.timestamp.seconds = u64Now / 1000000000;
-	frame->header.timestamp.nanoseconds = u64Now % 1000000000;
+	frame->header.timestamp.seconds = u64Now / NANOSECONDS_PER_SECOND;
+	frame->header.timestamp.nanoseconds = u64Now % NANOSECONDS_PER_SECOND;
 #else
 #warning No time source is available.
 	// unknown
-	frame->header.timeSec = 0;
-	frame->header.timeNanosec = 0;
+	frame->header.timestamp.seconds = 0;
+	frame->header.timestamp.nanoseconds = 0;
 #endif
 
 	return bTimeSet;
@@ -61,8 +66,8 @@ uint32_t RscpProtocol::calculateCRC32(const uint8_t *data, uint16_t length) {
     };
 	uint32_t crc = 0;
     for(uint32_t n = 0; n < length; n++) {
-        crc = (crc >> 4) ^ crc_table[(crc ^ (data[n] >> 0)) & 0x0F];  /* lower nibble */
-        crc = (crc >> 4) ^ crc_table[(crc ^ (data[n] >> 4)) & 0x0F];  /* upper nibble */
+        crc = (crc >> RSCP_CRC_NIBBLE_SHIFT) ^ crc_table[(crc ^ (data[n] >> 0)) & 0x0F];  /* lower nibble */
+        crc = (crc >> RSCP_CRC_NIBBLE_SHIFT) ^ crc_table[(crc ^ (data[n] >> RSCP_CRC_NIBBLE_SHIFT)) & 0x0F];  /* upper nibble */
 	}
 	return crc;
 }
@@ -87,7 +92,7 @@ int32_t RscpProtocol::getFrameLength(const uint8_t * data, const uint32_t & leng
 		return RSCP::ERR_PROT_VERSION_MISMATCH;
 	}
 	// calculate the expected frame length
-	int32_t frameLength = sizeof(SRscpFrameHeader) + header->dataLength + ((header->ctrl.bits.crc != 0) ? sizeof(uint32_t) : 0);
+	int32_t frameLength = sizeof(SRscpFrameHeader) + header->dataLength + ((header->ctrl.bits.crc != 0) ? RSCP_CRC_SIZE_BYTES : 0);
 	return frameLength;
 }
 
@@ -118,8 +123,8 @@ int32_t RscpProtocol::createFrameAsBuffer(SRscpFrameBuffer* frameBuffer, const u
 
 	// calculate CRC if necessary and add to the frame
 	if(calcCRC) {
-		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - sizeof(uint32_t));
-		memcpy(&frameBuffer->data[frameBuffer->dataLength - sizeof(uCRC32)], &uCRC32, sizeof(uCRC32));
+		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES);
+		memcpy(&frameBuffer->data[frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES], &uCRC32, RSCP_CRC_SIZE_BYTES);
 	}
 
 	return RSCP::OK;
@@ -177,8 +182,8 @@ int32_t RscpProtocol::createFrameAsBuffer(SRscpFrameBuffer *frameBuffer, const s
 
 	// calculate CRC if necessary and add to the frame
 	if(calcCRC) {
-		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - sizeof(uint32_t));
-		memcpy(frameBuffer->data + frameBuffer->dataLength - sizeof(uCRC32), &uCRC32, sizeof(uCRC32));
+		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES);
+		memcpy(frameBuffer->data + frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES, &uCRC32, RSCP_CRC_SIZE_BYTES);
 	}
 
 	return RSCP::OK;
@@ -226,8 +231,8 @@ int32_t RscpProtocol::createFrameAsBuffer(SRscpFrameBuffer *frameBuffer, const S
 
 	// calculate CRC if necessary and add to the frame
 	if(calcCRC) {
-		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - sizeof(uint32_t));
-		memcpy(frameBuffer->data + frameBuffer->dataLength - sizeof(uCRC32), &uCRC32, sizeof(uCRC32));
+		uint32_t uCRC32 = calculateCRC32(frameBuffer->data, frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES);
+		memcpy(frameBuffer->data + frameBuffer->dataLength - RSCP_CRC_SIZE_BYTES, &uCRC32, RSCP_CRC_SIZE_BYTES);
 	}
 
 	return RSCP::OK;
@@ -315,15 +320,15 @@ int32_t RscpProtocol::parseFrame(const uint8_t* data, const uint32_t & length, S
 		return RSCP::ERR_PROT_VERSION_MISMATCH;
 	}
 	// check the frame length
-	uint32_t frameLength = sizeof(SRscpFrameHeader) + inFrame->header.dataLength + ((inFrame->header.ctrl.bits.crc != 0) ? sizeof(uint32_t) : 0);
+	uint32_t frameLength = sizeof(SRscpFrameHeader) + inFrame->header.dataLength + ((inFrame->header.ctrl.bits.crc != 0) ? RSCP_CRC_SIZE_BYTES : 0);
 	if(frameLength > length) {
 		return RSCP::ERR_INVALID_FRAME_LENGTH;
 	}
 	// check that CRC matches before starting to parse
 	if(inFrame->header.ctrl.bits.crc != 0) {
-		uint32_t calcCRC32 = calculateCRC32(data, frameLength - sizeof(uint32_t));
+		uint32_t calcCRC32 = calculateCRC32(data, frameLength - RSCP_CRC_SIZE_BYTES);
 		uint32_t frameCRC32;
-		memcpy(&frameCRC32, data + frameLength - sizeof(uint32_t), sizeof(uint32_t));
+		memcpy(&frameCRC32, data + frameLength - RSCP_CRC_SIZE_BYTES, RSCP_CRC_SIZE_BYTES);
 		// compare CRC
 		if(frameCRC32 != calcCRC32) {
 			return RSCP::ERR_INVALID_CRC;
@@ -343,7 +348,7 @@ int32_t RscpProtocol::parseFrame(const uint8_t* data, const uint32_t & length, S
 		return iResult;
 	}
 	// parsing done return OK
-	frameLength = (sizeof(SRscpFrameHeader) + iResult + ((inFrame->header.ctrl.bits.crc != 0) ? sizeof(uint32_t) : 0));
+	frameLength = (sizeof(SRscpFrameHeader) + iResult + ((inFrame->header.ctrl.bits.crc != 0) ? RSCP_CRC_SIZE_BYTES : 0));
 	return frameLength;
 }
 
@@ -409,7 +414,7 @@ int32_t RscpProtocol::createValue(SRscpValue* response, const SRscpTag & tag, co
 	// calculate the new tag size
 	uint16_t newTagLength = dataLength;
 	// check boundaries
-	if(newTagLength > 0xFFF8) {
+	if(newTagLength > RSCP_MAX_DATA_LENGTH) {
 		return RSCP::ERR_DATA_LIMIT_EXCEEDED;
 	}
 	// re-allocate the structure memory
@@ -440,7 +445,7 @@ int32_t RscpProtocol::createValue(SRscpValue* response, const SRscpTag & tag, co
 		newTagLength += sizeof(SRscpValue) - sizeof(value[i].data) + value[i].length;
 	}
 	// check boundaries
-	if(newTagLength > 0xFFF8) {
+	if(newTagLength > RSCP_MAX_DATA_LENGTH) {
 		return RSCP::ERR_DATA_LIMIT_EXCEEDED;
 	}
 	// re-allocate the structure memory
@@ -477,7 +482,7 @@ int32_t RscpProtocol::appendValue(SRscpValue* response, const SRscpTag & tag, co
 	// calculate the new tag size
 	uint16_t newTagLength = sizeof(SRscpValue) - sizeof(response->data) + dataLength;
 	// check boundaries
-	if(response->length + newTagLength > 0xFFF8) {
+	if(response->length + newTagLength > RSCP_MAX_DATA_LENGTH) {
 		return RSCP::ERR_DATA_LIMIT_EXCEEDED;
 	}
 	// re-allocate the structure memory
@@ -509,7 +514,7 @@ int32_t RscpProtocol::appendValue(SRscpValue* response, const SRscpTag & tag, co
 		newTagLength += sizeof(SRscpValue) - sizeof(value[i].data) + value[i].length;
 	}
 	// check boundaries
-	if(response->length + newTagLength > 0xFFF8) {
+	if(response->length + newTagLength > RSCP_MAX_DATA_LENGTH) {
 		return RSCP::ERR_DATA_LIMIT_EXCEEDED;
 	}
 	// re-allocate the structure memory
@@ -552,7 +557,7 @@ int32_t RscpProtocol::appendValue(SRscpValue* response, const std::vector<SRscpV
 		newTagLength += sizeof(SRscpValue) - sizeof(value[i].data) + value[i].length;
 	}
 	// check boundaries
-	if(response->length + newTagLength > 0xFFF8) {
+	if(response->length + newTagLength > RSCP_MAX_DATA_LENGTH) {
 		return RSCP::ERR_DATA_LIMIT_EXCEEDED;
 	}
 	// re-allocate the structure memory

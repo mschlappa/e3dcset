@@ -32,6 +32,7 @@ CommandContext::CommandContext() :
     batContainerQuery(false),
     modulInfoDump(false),
     setEPReserve(false),
+    sysInfoAbfrage(false),
     watchMode(false),
     watchInterval(DEFAULT_WATCH_INTERVAL_SECONDS),
     needMoreDCBRequests(false),
@@ -75,6 +76,7 @@ void usage(void){
     fprintf(stderr, "     -e  Manuelle Speicherladung (Wh)\n");
     fprintf(stderr, "     -E  Notstromreserve setzen (Wh, 0 = deaktiviert)\n");
     fprintf(stderr, "     -r  Bestimmten Tag abfragen (Hex-Wert oder Name, z.B. EMS_POWER_PV)\n");
+    fprintf(stderr, "     --info  System-Info abfragen (SW-Version, Seriennummer, Produktionsdatum)\n");
     fprintf(stderr, "     -i  Batterie-Modul Index (0 = erstes Modul, Standard: 0)\n");
     fprintf(stderr, "     -m  Alle Werte eines Batterie-Moduls anzeigen (Modul-Info-Dump)\n");
     fprintf(stderr, "     -q  Quiet Mode - nur Wert ausgeben (für Scripting)\n");
@@ -104,6 +106,8 @@ void usage(void){
     fprintf(stderr, "     e3dcset -H day -j               # Tagesdaten als JSON\n");
     fprintf(stderr, "     e3dcset -H day -D 2024-11-20    # Tagesdaten vom 20.11.2024\n");
     fprintf(stderr, "     e3dcset -E 2600                 # Notstromreserve auf 2600 Wh setzen\n");
+    fprintf(stderr, "     e3dcset --info                  # System-Info anzeigen\n");
+    fprintf(stderr, "     e3dcset --info -j               # System-Info als JSON\n");
     fprintf(stderr, "     e3dcset -E 0                    # Notstromreserve deaktivieren\n");
     fprintf(stderr, "     e3dcset -t /path/custom.tags -l 1  # Custom Tags-Datei verwenden\n");
     fprintf(stderr, "     e3dcset -r EMS_POWER_PV -w      # PV-Leistung alle 5s (Ctrl+C zum Beenden)\n");
@@ -370,7 +374,12 @@ void checkArguments(void){
         exit(EXIT_FAILURE);
     }
 
-    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve){
+    if (g_ctx.sysInfoAbfrage && (g_ctx.leistungAendern || g_ctx.manuelleSpeicherladung || g_ctx.setEPReserve)){
+        fprintf(stderr, "[--info] kann nicht zusammen mit [-c], [-d], [-e], [-E] oder [-a] verwendet werden\n\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (!g_ctx.leistungAendern && !g_ctx.manuelleSpeicherladung && !g_ctx.werteAbfragen && !g_ctx.historieAbfrage && !g_ctx.modulInfoDump && !g_ctx.setEPReserve && !g_ctx.sysInfoAbfrage){
         fprintf(stderr, "Keine Verbindung mit Server erforderlich\n\n");
         exit(EXIT_FAILURE);
     }

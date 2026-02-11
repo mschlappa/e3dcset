@@ -1122,16 +1122,16 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 }
                 case TAG_DB_VALUE_CONTAINER: {
                     if (g_ctx.rawOutput) {
+                        static uint32_t rawCounter = 0;
                         std::vector<SRscpValue> valData = protocol->getValueAsContainer(&historyData[i]);
                         
                         float vBatIn = 0, vBatOut = 0, vDcPower = 0;
                         float vGridIn = 0, vGridOut = 0, vConsumption = 0;
-                        uint32_t vGraphIndex = 0;
                         
                         for(size_t j = 0; j < valData.size(); ++j) {
                             switch(valData[j].tag) {
                                 case TAG_DB_GRAPH_INDEX:
-                                    vGraphIndex = protocol->getValueAsUInt32(&valData[j]);
+                                    // Graph index ignored for timestamp - using counter instead
                                     break;
                                 case TAG_DB_BAT_POWER_IN:
                                     vBatIn = protocol->getValueAsFloat32(&valData[j]);
@@ -1156,10 +1156,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             }
                         }
                         
-                        uint64_t vTimestamp = (uint64_t)g_ctx.historieStartTime + (uint64_t)vGraphIndex * g_ctx.historieInterval;
-                        printf("%llu,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
-                               (unsigned long long)vTimestamp,
+                        time_t valTime = g_ctx.historieStartTime + (rawCounter * g_ctx.historieInterval);
+                        printf("%ld,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f\n",
+                               (long)valTime,
                                vDcPower, vBatIn, vBatOut, vGridIn, vGridOut, vConsumption);
+                        rawCounter++;
                         
                         protocol->destroyValueData(valData);
                     } else {

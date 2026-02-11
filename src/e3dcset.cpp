@@ -31,6 +31,7 @@ int main(int argc, char *argv[])
     static struct option long_options[] = {
         {"watch", no_argument, 0, 'w'},
         {"interval", required_argument, 0, 1},
+        {"raw", no_argument, 0, 2},
         {0, 0, 0, 0}
     };
 
@@ -135,6 +136,9 @@ int main(int argc, char *argv[])
                         MIN_WATCH_INTERVAL_SECONDS);
                 exit(EXIT_FAILURE);
             }
+            break;
+        case 2: // --raw
+            g_ctx.rawOutput = true;
             break;
         default:
             usage();

@@ -131,3 +131,46 @@ TEST_CASE("BAT namespace detection", "[bat-container]") {
         REQUIRE(isBatContainerRequired(0x0A000001) == false);  // INFO namespace
     }
 }
+
+// Helper function to check if a tag needs PVI_REQ_DATA container wrapping
+static bool isPviContainerRequired(uint32_t tag) {
+    return (tag & RSCP_TAG_PVI_NAMESPACE_MASK) == RSCP_TAG_PVI_NAMESPACE &&
+           (tag & RSCP_TAG_PVI_CONTAINER_MASK) != RSCP_TAG_PVI_CONTAINER_PREFIX &&
+           !(tag & RSCP_TAG_RESPONSE_BIT);
+}
+
+TEST_CASE("PVI namespace detection", "[pvi-container]") {
+    SECTION("PVI_REQ tags need container wrapping") {
+        REQUIRE(isPviContainerRequired(0x02000001) == true);   // PVI_REQ_ON_GRID
+        REQUIRE(isPviContainerRequired(0x02000002) == true);   // PVI_REQ_STATE
+        REQUIRE(isPviContainerRequired(0x02000003) == true);   // PVI_REQ_LAST_ERROR
+        REQUIRE(isPviContainerRequired(0x02000009) == true);   // PVI_REQ_TYPE
+        REQUIRE(isPviContainerRequired(0x02000060) == true);   // PVI_REQ_COS_PHI
+        REQUIRE(isPviContainerRequired(0x02000085) == true);   // PVI_REQ_SYSTEM_MODE
+    }
+
+    SECTION("PVI_REQ_DEVICE_STATE needs container wrapping") {
+        REQUIRE(isPviContainerRequired(0x02060000) == true);   // PVI_REQ_DEVICE_STATE
+    }
+
+    SECTION("PVI container tags must NOT be wrapped") {
+        REQUIRE(isPviContainerRequired(0x02040000) == false);  // PVI_REQ_DATA
+        REQUIRE(isPviContainerRequired(0x02040001) == false);  // PVI_INDEX
+        REQUIRE(isPviContainerRequired(0x02040005) == false);  // PVI_VALUE
+    }
+
+    SECTION("PVI response tags must NOT be wrapped") {
+        REQUIRE(isPviContainerRequired(0x02800001) == false);  // PVI_ON_GRID
+        REQUIRE(isPviContainerRequired(0x02800002) == false);  // PVI_STATE
+        REQUIRE(isPviContainerRequired(0x02840000) == false);  // PVI_DATA
+        REQUIRE(isPviContainerRequired(0x02860000) == false);  // PVI_DEVICE_STATE
+        REQUIRE(isPviContainerRequired(0x02860001) == false);  // PVI_DEVICE_CONNECTED
+    }
+
+    SECTION("Other namespaces must NOT be wrapped as PVI") {
+        REQUIRE(isPviContainerRequired(0x03000001) == false);  // BAT namespace
+        REQUIRE(isPviContainerRequired(0x01000001) == false);  // EMS namespace
+        REQUIRE(isPviContainerRequired(0x06000001) == false);  // DB namespace
+        REQUIRE(isPviContainerRequired(0x00000001) == false);  // RSCP namespace
+    }
+}

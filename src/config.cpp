@@ -30,6 +30,7 @@ CommandContext::CommandContext() :
     historieAbfrage(false),
     rawOutput(false),
     batContainerQuery(false),
+    pviContainerQuery(false),
     modulInfoDump(false),
     setEPReserve(false),
     sysInfoAbfrage(false),

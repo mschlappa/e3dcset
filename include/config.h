@@ -51,6 +51,7 @@ struct CommandContext {
     bool historieAbfrage;
     bool rawOutput;
     bool batContainerQuery;
+    bool pviContainerQuery;
     bool modulInfoDump;
     bool setEPReserve;
     bool sysInfoAbfrage;

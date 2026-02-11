@@ -84,9 +84,24 @@ int createRequestExample(SRscpFrameBuffer * frameBuffer) {
                     protocol.appendValue(&rootValue, batContainer);
                     protocol.destroyValueData(batContainer);
                     g_ctx.batContainerQuery = true;
+                    g_ctx.pviContainerQuery = false;
+                // Check if this is a PVI tag (0x02xxxxxx) but NOT a container/response tag
+                } else if ((g_ctx.leseTag & RSCP_TAG_PVI_NAMESPACE_MASK) == RSCP_TAG_PVI_NAMESPACE &&
+                           (g_ctx.leseTag & RSCP_TAG_PVI_CONTAINER_MASK) != RSCP_TAG_PVI_CONTAINER_PREFIX &&
+                           !(g_ctx.leseTag & RSCP_TAG_RESPONSE_BIT)) {
+                    DEBUG("PVI_REQ_* Tag erkannt - erstelle PVI_REQ_DATA Container\n");
+                    SRscpValue pviContainer;
+                    protocol.createContainerValue(&pviContainer, TAG_PVI_REQ_DATA);
+                    protocol.appendValue(&pviContainer, TAG_PVI_INDEX, g_ctx.batIndex);
+                    protocol.appendValue(&pviContainer, g_ctx.leseTag);
+                    protocol.appendValue(&rootValue, pviContainer);
+                    protocol.destroyValueData(pviContainer);
+                    g_ctx.pviContainerQuery = true;
+                    g_ctx.batContainerQuery = false;
                 } else {
                     protocol.appendValue(&rootValue, g_ctx.leseTag);
                     g_ctx.batContainerQuery = false;
+                    g_ctx.pviContainerQuery = false;
                 }
         }
         
@@ -916,6 +931,145 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             
             break;
         }
+
+    case TAG_PVI_DATA: {        // response for TAG_PVI_REQ_DATA
+        std::vector<SRscpValue> pviData = protocol->getValueAsContainer(response);
+        
+        // Calculate expected response tag from request tag
+        uint32_t expectedResponseTag = 0;
+        if (g_ctx.pviContainerQuery) {
+            expectedResponseTag = g_ctx.leseTag | RSCP_TAG_RESPONSE_BIT;
+        }
+        
+        bool foundRequestedTag = false;
+        
+        for(size_t i = 0; i < pviData.size(); ++i) {
+            if(pviData[i].dataType == RSCP::eTypeError) {
+                uint32_t uiErrorCode = protocol->getValueAsUInt32(&pviData[i]);
+                const char* errorDesc = getErrorDescription(uiErrorCode);
+                fprintf(stderr, "RSCP Error: Tag 0x%08X - Code 0x%02X (%u): %s\n", 
+                        pviData[i].tag, uiErrorCode, uiErrorCode, errorDesc);
+                for(size_t j = 0; j < pviData.size(); ++j) {
+                    protocol->destroyValueData(&pviData[j]);
+                }
+                g_ctx.pviContainerQuery = false;
+                return -1;
+            }
+            
+            // Skip PVI_INDEX in output
+            if (pviData[i].tag == TAG_PVI_INDEX) {
+                continue;
+            }
+            
+            // In quiet mode, only process the requested tag's response
+            if (g_ctx.quietMode && pviData[i].tag != expectedResponseTag) {
+                continue;
+            }
+            
+            if (pviData[i].tag == expectedResponseTag) {
+                foundRequestedTag = true;
+            }
+            
+            // Print value based on datatype
+            switch(pviData[i].dataType) {
+                case RSCP::eTypeFloat32: {
+                    float value = protocol->getValueAsFloat32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%.2f\n", value);
+                    } else if (g_ctx.jsonOutput) {
+                        jsonStart();
+                        jsonFieldInt("tag", pviData[i].tag);
+                        jsonField("value", std::to_string(value).c_str());
+                        jsonEnd();
+                    } else {
+                        printf("Tag 0x%08X: %.2f\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeBool: {
+                    bool value = protocol->getValueAsBool(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", value ? "true" : "false");
+                    } else {
+                        printf("Tag 0x%08X: %s\n", pviData[i].tag, value ? "true" : "false");
+                    }
+                    break;
+                }
+                case RSCP::eTypeUChar8: {
+                    uint8_t value = protocol->getValueAsUChar8(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeInt32: {
+                    int32_t value = protocol->getValueAsInt32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%d\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %d\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt32: {
+                    uint32_t value = protocol->getValueAsUInt32(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeUInt16: {
+                    uint16_t value = protocol->getValueAsUInt16(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%u\n", value);
+                    } else {
+                        printf("Tag 0x%08X: %u\n", pviData[i].tag, value);
+                    }
+                    break;
+                }
+                case RSCP::eTypeString: {
+                    std::string str = protocol->getValueAsString(&pviData[i]);
+                    if (g_ctx.quietMode) {
+                        printf("%s\n", str.c_str());
+                    } else {
+                        printf("Tag 0x%08X: %s\n", pviData[i].tag, str.c_str());
+                    }
+                    break;
+                }
+                case RSCP::eTypeContainer: {
+                    if (!g_ctx.quietMode) {
+                        printf("Tag 0x%08X: (Container mit %zu Elementen)\n", 
+                               pviData[i].tag, protocol->getValueAsContainer(&pviData[i]).size());
+                    }
+                    break;
+                }
+                default:
+                    if (!g_ctx.quietMode) {
+                        printf("Tag 0x%08X: (Typ %d)\n", pviData[i].tag, pviData[i].dataType);
+                    }
+                    break;
+            }
+            
+            if (g_ctx.quietMode && foundRequestedTag) {
+                break;
+            }
+        }
+        
+        if (g_ctx.quietMode && !foundRequestedTag) {
+            fprintf(stderr, "Fehler: Angeforderter Tag 0x%08X nicht in PVI Response gefunden\n", expectedResponseTag);
+        }
+        
+        for(size_t i = 0; i < pviData.size(); ++i) {
+            protocol->destroyValueData(&pviData[i]);
+        }
+        
+        g_ctx.pviContainerQuery = false;
+        break;
+    }
 
         case TAG_EMS_SET_POWER_SETTINGS: {        // response for TAG_PM_REQ_DATA
             uint8_t ucPMIndex = 0;

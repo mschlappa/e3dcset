@@ -65,6 +65,24 @@ void jsonField(const char* key, const char* value, bool isString = true);
 void jsonFieldInt(const char* key, int64_t value);
 void jsonFieldFloat(const char* key, double value);
 
+// JSON Module Dump Buffer
+// Collects fields during module dump for valid JSON output
+struct JsonModuleDumpBuffer {
+    std::vector<std::string> fields;  // "key":value pairs
+    std::vector<std::vector<std::string>> dcbs;  // per-DCB fields
+    int currentDcbIdx;
+    
+    JsonModuleDumpBuffer() : currentDcbIdx(-1) {}
+    void reset() { fields.clear(); dcbs.clear(); currentDcbIdx = -1; }
+    void addField(const std::string& key, const std::string& value, bool isString = false);
+    void addFieldStr(const std::string& key, const std::string& value);
+    void startDcb(int index);
+    void addDcbField(const std::string& key, const std::string& value, bool isString = false);
+    void addDcbFieldStr(const std::string& key, const std::string& value);
+    void output(uint16_t moduleIndex);
+};
+extern JsonModuleDumpBuffer g_jsonModuleDump;
+
 // Tag handling
 void loadTagsFile(const char* filename);
 const char* getTagDescription(uint32_t tag);
@@ -73,5 +91,6 @@ void printFormattedValue(uint32_t tag, const char* valueStr, int64_t numericValu
 uint32_t getTagByName(const char* name);
 bool isRequestTag(uint32_t tag);
 void printTagList(int category);
+const char* getTagNameByHex(uint32_t tag);
 
 #endif // OUTPUT_H

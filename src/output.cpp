@@ -13,6 +13,7 @@ std::map<int, std::vector<TagInfo>> loadedTags;
 std::map<std::string, std::string> loadedInterpretations;
 BatteryModuleData g_batteryData;
 bool g_jsonFirstField = true;
+JsonModuleDumpBuffer g_jsonModuleDump;
 
 // Category descriptors
 const CategoryDescriptor categoryDescriptors[] = {
@@ -328,4 +329,100 @@ void printTagList(int category) {
     printf("  ./e3dcset -r 0x%08X       # Mit Hex-Wert\n\n", category == CATEGORY_EMS ? TAG_EMS_REQ_BAT_SOC : TAG_BAT_REQ_DATA);
 }
 
+const char* getTagNameByHex(uint32_t tag) {
+    // Try REQUEST tag first (clear response bit)
+    uint32_t requestTag = tag;
+    if ((tag & 0x00800000) != 0) {
+        requestTag = tag & ~0x00800000;
+    }
+    for (auto& categoryPair : loadedTags) {
+        for (auto& tagInfo : categoryPair.second) {
+            if (tagInfo.hex == requestTag) {
+                return tagInfo.name.c_str();
+            }
+        }
+    }
+    if (requestTag != tag) {
+        for (auto& categoryPair : loadedTags) {
+            for (auto& tagInfo : categoryPair.second) {
+                if (tagInfo.hex == tag) {
+                    return tagInfo.name.c_str();
+                }
+            }
+        }
+    }
+    return NULL;
+}
 
+// --- JSON Module Dump Buffer implementation ---
+
+static std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (size_t i = 0; i < s.size(); i++) {
+        char c = s[i];
+        if (c == '"' || c == '\\') out += '\\';
+        out += c;
+    }
+    return out;
+}
+
+void JsonModuleDumpBuffer::addField(const std::string& key, const std::string& value, bool isString) {
+    if (isString) {
+        fields.push_back("\"" + jsonEscape(key) + "\":\"" + jsonEscape(value) + "\"");
+    } else {
+        fields.push_back("\"" + jsonEscape(key) + "\":" + value);
+    }
+}
+
+void JsonModuleDumpBuffer::addFieldStr(const std::string& key, const std::string& value) {
+    addField(key, value, true);
+}
+
+void JsonModuleDumpBuffer::startDcb(int index) {
+    currentDcbIdx = (int)dcbs.size();
+    dcbs.push_back(std::vector<std::string>());
+    // Add index field
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%d", index);
+    dcbs.back().push_back(std::string("\"index\":") + buf);
+}
+
+void JsonModuleDumpBuffer::addDcbField(const std::string& key, const std::string& value, bool isString) {
+    if (currentDcbIdx < 0 || currentDcbIdx >= (int)dcbs.size()) return;
+    if (isString) {
+        dcbs[currentDcbIdx].push_back("\"" + jsonEscape(key) + "\":\"" + jsonEscape(value) + "\"");
+    } else {
+        dcbs[currentDcbIdx].push_back("\"" + jsonEscape(key) + "\":" + value);
+    }
+}
+
+void JsonModuleDumpBuffer::addDcbFieldStr(const std::string& key, const std::string& value) {
+    addDcbField(key, value, true);
+}
+
+void JsonModuleDumpBuffer::output(uint16_t moduleIndex) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%u", moduleIndex);
+    
+    printf("{\"module\":%s,\"data\":{", buf);
+    for (size_t i = 0; i < fields.size(); i++) {
+        if (i > 0) printf(",");
+        printf("%s", fields[i].c_str());
+    }
+    if (!dcbs.empty()) {
+        if (!fields.empty()) printf(",");
+        printf("\"dcbs\":[");
+        for (size_t d = 0; d < dcbs.size(); d++) {
+            if (d > 0) printf(",");
+            printf("{");
+            for (size_t f = 0; f < dcbs[d].size(); f++) {
+                if (f > 0) printf(",");
+                printf("%s", dcbs[d][f].c_str());
+            }
+            printf("}");
+        }
+        printf("]");
+    }
+    printf("}}\n");
+}

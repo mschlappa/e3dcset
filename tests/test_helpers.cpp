@@ -153,3 +153,10 @@ TEST_CASE("interpretValue - zero value", "[helpers]") {
 
     REQUIRE(std::string(interpretValue(0x01000001, 0, interp)) == "Aus");
 }
+
+// ============================================================================
+// JsonModuleDumpBuffer tests (CLI-based to avoid link dependency)
+// ============================================================================
+
+// These tests verify JSON module dump output via the CLI test script
+// (see tests/test_json_module_dump.sh)

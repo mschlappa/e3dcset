@@ -432,8 +432,13 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
         bool receivedDCBData = false;  // Track if this response contained actual DCB data
         
         // Print header for module info dump (only on first call for this module)
-        if (g_ctx.modulInfoDump && !g_ctx.quietMode && g_ctx.isFirstModuleDumpRequest) {
+        if (g_ctx.modulInfoDump && !g_ctx.quietMode && !g_ctx.jsonOutput && g_ctx.isFirstModuleDumpRequest) {
             printf("Batterie Modul %u:\n", g_ctx.batIndex);
+        }
+        
+        // Reset JSON buffer on first request
+        if (g_ctx.modulInfoDump && g_ctx.jsonOutput && g_ctx.isFirstModuleDumpRequest) {
+            g_jsonModuleDump.reset();
         }
         
         for(size_t i = 0; i < batteryData.size(); ++i) {
@@ -488,7 +493,8 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
             
             // Print tag prefix - formatted for module dump, raw for single query
             // Skip printing BAT_DCB_INFO tag itself (only print its contents)
-            if (!g_ctx.quietMode && batteryData[i].tag != TAG_BAT_DCB_INFO) {
+            // In JSON mode for module dump, skip label printing entirely (collected in buffer)
+            if (!g_ctx.quietMode && !g_ctx.jsonOutput && batteryData[i].tag != TAG_BAT_DCB_INFO) {
                 if (g_ctx.modulInfoDump) {
                     // Friendly label for module info dump
                     const char* label = getTagDescription(batteryData[i].tag);
@@ -511,7 +517,12 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     // Use std::llround for proper rounding (handles negative values)
                     int64_t roundedValue = std::llround(value);
                     const char* interp = interpretValue(batteryData[i].tag, roundedValue);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        std::string key = tagName ? tagName : hexKey;
+                        g_jsonModuleDump.addField(key, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump && interp) {
                         printf("  %s (%s)\n", buf, interp);
@@ -528,7 +539,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     uint8_t value = protocol->getValueAsUChar8(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -546,7 +561,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     int32_t value = protocol->getValueAsInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%d", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -564,7 +583,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                     uint32_t value = protocol->getValueAsUInt32(&batteryData[i]);
                     char buf[32];
                     snprintf(buf, sizeof(buf), "%u", value);
-                    if (g_ctx.quietMode) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addField(tagName ? tagName : hexKey, buf);
+                    } else if (g_ctx.quietMode) {
                         printf("%s\n", buf);
                     } else if (g_ctx.modulInfoDump) {
                         const char* interp = interpretValue(batteryData[i].tag, value);
@@ -580,7 +603,11 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                 }
                 case RSCP::eTypeString: {
                     std::string str = protocol->getValueAsString(&batteryData[i]);
-                    if (g_ctx.modulInfoDump) {
+                    if (g_ctx.jsonOutput && g_ctx.modulInfoDump) {
+                        const char* tagName = getTagNameByHex(batteryData[i].tag);
+                        char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", batteryData[i].tag);
+                        g_jsonModuleDump.addFieldStr(tagName ? tagName : hexKey, str);
+                    } else if (g_ctx.modulInfoDump) {
                         printf("  %s\n", str.c_str());
                     } else {
                         printf("%s\n", str.c_str());
@@ -610,8 +637,79 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                             }
                         }
                         
-                        // Print grouped DCB data (only if NOT in quiet mode)
-                        if (!g_ctx.quietMode && dcbData.size() > 0) {
+                        // Output grouped DCB data
+                        if (dcbData.size() > 0) {
+                          if (g_ctx.jsonOutput) {
+                            // JSON mode: collect DCB data into buffer
+                            for (auto& dcbPair : dcbData) {
+                                g_jsonModuleDump.startDcb(dcbPair.first);
+                                for (auto& tagValuePair : dcbPair.second) {
+                                    const char* tagName = getTagNameByHex(tagValuePair.first);
+                                    char hexKey[20]; snprintf(hexKey, sizeof(hexKey), "0x%08X", tagValuePair.first);
+                                    std::string key = tagName ? tagName : hexKey;
+                                    char vbuf[64];
+                                    switch(tagValuePair.second.dataType) {
+                                        case RSCP::eTypeBool:
+                                            g_jsonModuleDump.addDcbField(key, protocol->getValueAsBool(&tagValuePair.second) ? "true" : "false");
+                                            break;
+                                        case RSCP::eTypeChar8:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsChar8(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUChar8:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUChar8(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt16:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsInt16(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt16:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUInt16(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt32:
+                                            snprintf(vbuf, sizeof(vbuf), "%d", protocol->getValueAsInt32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt32:
+                                            snprintf(vbuf, sizeof(vbuf), "%u", protocol->getValueAsUInt32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeInt64:
+                                            snprintf(vbuf, sizeof(vbuf), "%lld", (long long)protocol->getValueAsInt64(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeUInt64: {
+                                            uint64_t val = protocol->getValueAsUInt64(&tagValuePair.second);
+                                            if (tagValuePair.first == TAG_BAT_DCB_LAST_MESSAGE_TIMESTAMP) {
+                                                g_jsonModuleDump.addDcbFieldStr(key, formatTimestamp(val));
+                                            } else {
+                                                snprintf(vbuf, sizeof(vbuf), "%llu", (unsigned long long)val);
+                                                g_jsonModuleDump.addDcbField(key, vbuf);
+                                            }
+                                            break;
+                                        }
+                                        case RSCP::eTypeFloat32:
+                                            snprintf(vbuf, sizeof(vbuf), "%.2f", protocol->getValueAsFloat32(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeDouble64:
+                                            snprintf(vbuf, sizeof(vbuf), "%.4f", protocol->getValueAsDouble64(&tagValuePair.second));
+                                            g_jsonModuleDump.addDcbField(key, vbuf);
+                                            break;
+                                        case RSCP::eTypeString: {
+                                            std::string str = protocol->getValueAsString(&tagValuePair.second);
+                                            g_jsonModuleDump.addDcbFieldStr(key, str);
+                                            break;
+                                        }
+                                        default:
+                                            break;
+                                    }
+                                }
+                            }
+                          } else if (!g_ctx.quietMode) {
+                            // Plaintext mode: print DCB data
                             for (auto& dcbPair : dcbData) {
                                 printf("Zellblock #%u\n", dcbPair.first);
                                 for (auto& tagValuePair : dcbPair.second) {
@@ -703,6 +801,7 @@ int handleResponseValue(RscpProtocol *protocol, SRscpValue *response) {
                                 }
                                 printf("\n");
                             }
+                          }
                         }
                         
                         // Clean up
@@ -1860,6 +1959,10 @@ void mainLoop(void)
                 // Non-watch mode: After first receive, check if we need more DCB requests
                 if (counter > 0) {
                     if (!g_ctx.needMoreDCBRequests) {
+                        // Output JSON module dump buffer if applicable
+                        if (g_ctx.modulInfoDump && g_ctx.jsonOutput) {
+                            g_jsonModuleDump.output(g_ctx.batIndex);
+                        }
                         // No more requests needed - stop
                         bStopExecution = true;
                     }
